@@ -1,0 +1,101 @@
+{
+  "sections": {
+    "home": {
+      "label": "首页",
+      "groups": [
+        {
+          "key": "loan-categories",
+          "label": "贷款种类",
+          "children": [
+            {
+              "key": "bank-house-mortgage",
+              "label": "银行房产抵押"
+            },
+            {
+              "key": "bank-credit-loan",
+              "label": "银行信用贷"
+            },
+            {
+              "key": "private-house-mortgage",
+              "label": "民间房产抵押"
+            },
+            {
+              "key": "redeem-bridge-funding",
+              "label": "赎楼垫资"
+            },
+            {
+              "key": "car-loan",
+              "label": "车贷"
+            }
+          ]
+        },
+        {
+          "key": "tools-links",
+          "label": "工具链接",
+          "children": [
+            {
+              "key": "featured-tools",
+              "label": "精选工具"
+            }
+          ]
+        },
+        {
+          "key": "article-center",
+          "label": "文章",
+          "adminOnly": true,
+          "children": [
+            {
+              "key": "featured-articles",
+              "label": "精选文章"
+            }
+          ]
+        }
+      ]
+    },
+    "recharge": {
+      "label": "资源中心",
+      "groups": [
+        {
+          "key": "plans",
+          "label": "充值套餐",
+          "children": [
+            {
+              "key": "monthly",
+              "label": "月度套餐"
+            },
+            {
+              "key": "quarterly",
+              "label": "季度套餐"
+            }
+          ]
+        }
+      ]
+    },
+    "achievements": {
+      "label": "成长体系",
+      "groups": [
+        {
+          "key": "medals",
+          "label": "勋章体系",
+          "children": [
+            {
+              "key": "growth",
+              "label": "成长勋章"
+            },
+            {
+              "key": "sales",
+              "label": "业绩勋章"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "contents": [],
+  "notes": [],
+  "userProfiles": {},
+  "vipUsers": {},
+  "userNotifications": {},
+  "rechargeOrders": [],
+  "growthCustomers": []
+}

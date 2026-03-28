@@ -1,0 +1,13 @@
+{
+  "name": "zhishiku-h5",
+  "version": "1.0.0",
+  "description": "H5 project with home, recharge center, achievements, and admin content management",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "redis": "^5.11.0"
+  }
+}

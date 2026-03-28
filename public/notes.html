@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Note - 知识库</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-title="Note">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">知识库</p>
+        <h1>Note</h1>
+        <p class="hero-copy">集中查看和检索便签内容，适合记录客户跟进、流程要点、临时知识和待办事项。</p>
+      </div>
+      <nav class="nav">
+        <a href="/">首页</a>
+        <a href="/recharge.html">资源中心</a>
+        <a href="/achievements.html">成长体系</a>
+        <a href="/notes.html">Note</a>
+        <a href="/admin.html">内容管理</a>
+      </nav>
+    </header>
+
+    <main class="page-shell">
+      <section class="section-block">
+        <div class="panel-head">
+          <div>
+            <h2>便签列表</h2>
+            <p class="hero-copy">支持按关键词检索标题、分类和正文内容。</p>
+          </div>
+          <input id="note-keyword" type="search" placeholder="搜索 note" />
+        </div>
+        <div id="notes-app" class="content-list"></div>
+      </section>
+    </main>
+
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="/site-meta.js"></script>
+    <script src="/common.js"></script>
+    <script src="/notes.js"></script>
+  </body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "pages": [
+    "pages/h5-share-shell/h5-share-shell",
+    "pages/share/index",
+    "pages/webview/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "Share Shell",
+    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f5f7fb",
+    "backgroundTextStyle": "dark"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

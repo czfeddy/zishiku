@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>成长系统 - 知识库</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-title="成长系统">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">成长系统</p>
+        <h1>客户项目录入与修改申请</h1>
+        <p class="hero-copy">
+          新客户可直接提交贷款项目；已录入项目如需修改，可在下方发起修改申请，等待后台审核。审核通过或拒绝后的回复，也会在本页同步展示。
+        </p>
+      </div>
+      <nav class="nav">
+        <a href="/">首页</a>
+        <a href="/recharge.html">资源中心</a>
+        <a href="/achievements.html">成长系统</a>
+        <a href="/notes.html">Note</a>
+        <a href="/admin.html">内容管理</a>
+      </nav>
+    </header>
+
+    <main class="page-shell growth-page">
+      <section class="section-block growth-hero-card">
+        <div>
+          <p class="eyebrow">审核流</p>
+          <h2>前端提交申请，后台审核通过后正式生效</h2>
+          <p class="hero-copy">
+            用户端只能发起修改申请，不会直接覆盖项目内容。后台会查看修改前后对比，再决定通过或拒绝。
+          </p>
+        </div>
+        <div class="growth-highlight-list">
+          <article class="growth-highlight">
+            <strong>1</strong>
+            <span>新增客户与项目可直接提交</span>
+          </article>
+          <article class="growth-highlight">
+            <strong>2</strong>
+            <span>已有项目修改需等待后台审核</span>
+          </article>
+          <article class="growth-highlight">
+            <strong>3</strong>
+            <span>审核结果自动回到成长中心通知</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="section-block">
+        <div class="panel-head">
+          <div>
+            <h2>录入客户项目</h2>
+            <p class="hero-copy">首次提交会自动生成客户 ID 和头像，并立即同步到后台成长系统管理。</p>
+          </div>
+        </div>
+        <form id="growth-form" class="form-grid growth-form">
+          <label>
+            客户姓名
+            <input id="growth-customer-name" name="customerName" type="text" placeholder="请输入客户姓名" required />
+          </label>
+          <label>
+            贷款项目
+            <input id="growth-loan-project" name="loanProject" type="text" placeholder="例如：房产抵押经营贷" required />
+          </label>
+          <label>
+            金额
+            <input id="growth-amount" name="amount" type="text" placeholder="例如：80万" required />
+          </label>
+          <label>
+            详细信息
+            <textarea id="growth-details" name="details" rows="6" placeholder="请填写客户情况、当前进展、补充说明等" required></textarea>
+          </label>
+          <div class="chip-row">
+            <button id="growth-submit-btn" type="submit" class="primary-btn">提交到成长系统</button>
+          </div>
+        </form>
+        <p id="growth-message" class="status-text"></p>
+      </section>
+
+      <section class="section-block">
+        <div class="panel-head">
+          <div>
+            <h2>客户项目与审核通知</h2>
+            <p class="hero-copy">可查看已提交项目、发起修改申请，并接收后台通过或拒绝后的回复。</p>
+          </div>
+        </div>
+        <div id="growth-recent-list" class="content-list"></div>
+      </section>
+    </main>
+
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="/site-meta.js?v=20260325a"></script>
+    <script src="/common.js?v=20260325b"></script>
+    <script src="/achievements.js?v=20260325a"></script>
+  </body>
+</html>

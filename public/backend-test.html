@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>后端测试页 - 知识库</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-title="后端测试页">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Backend QA</p>
+        <h1>后端测试页</h1>
+        <p class="hero-copy">统一检测 API 是否可用，并展示当前服务实例、返回时间和核心数据统计。</p>
+      </div>
+      <nav class="nav">
+        <a href="/">首页</a>
+        <a href="/recharge.html">资源中心</a>
+        <a href="/achievements.html">成长体系</a>
+        <a href="/frontend-test.html">前端测试</a>
+        <a href="/backend-test.html">后端测试</a>
+        <a href="/admin.html">内容管理</a>
+      </nav>
+    </header>
+
+    <main class="page-shell test-shell">
+      <section class="section-block">
+        <div class="panel-head">
+          <div>
+            <h2>接口连通状态</h2>
+            <p class="hero-copy">建议分别用 `http://localhost:3000/backend-test.html` 和 `http://127.0.0.1:3000/backend-test.html` 打开，分别测试 Node 与 Python 实例。</p>
+          </div>
+          <div class="test-actions">
+            <button id="backend-refresh" type="button" class="primary-btn">刷新接口检测</button>
+          </div>
+        </div>
+        <div class="test-kv" id="backend-summary"></div>
+      </section>
+
+      <section class="section-block">
+        <h2>接口检测结果</h2>
+        <div class="test-grid" id="backend-results"></div>
+      </section>
+    </main>
+
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="/site-meta.js"></script>
+    <script src="/common.js"></script>
+    <script src="/backend-test.js"></script>
+  </body>
+</html>

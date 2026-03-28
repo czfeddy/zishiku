@@ -1,0 +1,45 @@
+<view class="page-shell share-page">
+  <view class="hero">
+    <view class="hero__eyebrow">小程序分享壳原型</view>
+    <view class="hero__title">先用小程序承接朋友圈卡片，再打开现有 H5 业务页</view>
+    <view class="hero__desc">这一步只替换分享载体，不动你现在的会员、名片和收费功能。</view>
+  </view>
+
+  <view class="card">
+    <view class="card__label">朋友圈卡片预览</view>
+    <image class="card__image" mode="aspectFill" src="{{content.shareImageUrl}}"></image>
+    <view class="card__body">
+      <view class="card__title">{{content.title}}</view>
+      <view class="card__summary">{{content.summary}}</view>
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="status status--info">正在读取 H5 内容数据...</view>
+  <view wx:if="{{error}}" class="status status--warn">{{error}}</view>
+
+  <view class="info-list">
+    <view class="info-list__item">
+      <text class="info-list__label">内容 slug</text>
+      <text class="info-list__value">{{content.slug}}</text>
+    </view>
+    <view class="info-list__item">
+      <text class="info-list__label">H5 链接</text>
+      <text class="info-list__value info-list__value--small">{{content.link}}</text>
+    </view>
+  </view>
+
+  <view class="actions">
+    <button class="primary-btn" type="primary" bindtap="handleOpenWebview" disabled="{{!canOpenWebview}}">
+      打开 H5 详情页
+    </button>
+    <button class="secondary-btn" bindtap="handleCopyLink">复制 H5 链接</button>
+    <button wx:if="{{error}}" class="ghost-btn" bindtap="handleRetry">重新拉取内容</button>
+  </view>
+
+  <view class="notes">
+    <view class="notes__title">当前阶段你可以先验证</view>
+    <view class="notes__item">分享页视觉、标题、摘要、头图是否符合业务预期</view>
+    <view class="notes__item">从小程序壳跳到 H5 详情页的整体链路</view>
+    <view class="notes__item">注册正式小程序后，再补齐真机朋友圈分享验证</view>
+  </view>
+</view>

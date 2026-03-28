@@ -1,0 +1,6 @@
+<view wx:if="{{!src}}" class="empty-state">
+  <view class="empty-state__title">还没有可打开的 H5 链接</view>
+  <view class="empty-state__desc">请先从分享页进入，或检查内容链接是否为空。</view>
+</view>
+
+<web-view wx:else src="{{src}}"></web-view>

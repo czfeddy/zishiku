@@ -1,0 +1,45 @@
+<view class="page-shell share-page">
+  <view class="hero">
+    <view class="hero__eyebrow">Mini Program Share Shell</view>
+    <view class="hero__title">Use a small share shell page to carry the share card, then open the existing H5 page.</view>
+    <view class="hero__desc">This stage focuses on validating the share entry, card content, and H5 jump path without changing the current H5 business flow.</view>
+  </view>
+
+  <view class="card">
+    <view class="card__label">Share Card Preview</view>
+    <image class="card__image" mode="aspectFill" src="{{content.shareImageUrl}}"></image>
+    <view class="card__body">
+      <view class="card__title">{{content.title}}</view>
+      <view class="card__summary">{{content.summary}}</view>
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="status status--info">Loading H5 content data...</view>
+  <view wx:if="{{error}}" class="status status--warn">{{error}}</view>
+
+  <view class="info-list">
+    <view class="info-list__item">
+      <text class="info-list__label">Content Slug</text>
+      <text class="info-list__value">{{content.slug}}</text>
+    </view>
+    <view class="info-list__item">
+      <text class="info-list__label">H5 Link</text>
+      <text class="info-list__value info-list__value--small">{{content.link}}</text>
+    </view>
+  </view>
+
+  <view class="actions">
+    <button class="primary-btn" type="primary" bindtap="handleOpenWebview" disabled="{{!canOpenWebview}}">
+      Open H5 Detail
+    </button>
+    <button class="secondary-btn" bindtap="handleCopyLink">Copy H5 Link</button>
+    <button wx:if="{{error}}" class="ghost-btn" bindtap="handleRetry">Retry Load</button>
+  </view>
+
+  <view class="notes">
+    <view class="notes__title">Current Validation Scope</view>
+    <view class="notes__item">Whether the share page card style, title, summary, and cover image match expectations.</view>
+    <view class="notes__item">Whether the jump from the shell page to the H5 detail page works end to end.</view>
+    <view class="notes__item">After official registration, continue real-device validation for share behavior and timeline sharing.</view>
+  </view>
+</view>

@@ -1,0 +1,14 @@
+{
+  "appid": "wxc068fe791aa69ee7",
+  "projectname": "zhishiku-share-shell",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": false
+  },
+  "compileType": "miniprogram",
+  "libVersion": "trial",
+  "srcMiniprogramRoot": "./"
+}

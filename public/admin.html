@@ -1,0 +1,299 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>后台管理 - 知识库</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-title="后台管理">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">后台管理</p>
+        <h1>后台管理中心</h1>
+        <p class="hero-copy">
+          后台分为 5 个板块：新增内容、内容管理、成长中心管理、资源中心管理、用户痕迹管理。此页仅展示后台管理能力，不展示前端页面内容。
+        </p>
+        <div class="chip-row">
+          <a class="chip" href="#content-create" data-admin-view-link="content-create">新增内容</a>
+          <a class="chip" href="#content-management" data-admin-view-link="content-management">内容管理</a>
+          <a class="chip" href="#growth-management" data-admin-view-link="growth-management">成长中心管理</a>
+          <a class="chip" href="#vip-management" data-admin-view-link="vip-management">资源中心管理</a>
+          <a class="chip" href="#analytics-management" data-admin-view-link="analytics-management">用户痕迹管理</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="admin-shell">
+      <section class="panel" id="content-create" data-admin-panel="content-create">
+        <div class="panel-head">
+          <div>
+            <h2>新增内容</h2>
+            <p class="hero-copy">在这里新增贷款、文章、工具链接内容。后台按业务类型维护，不再按前端页面结构展示。</p>
+          </div>
+        </div>
+        <form id="content-form" class="form-grid">
+          <select id="page" name="page" hidden aria-hidden="true"></select>
+          <select id="groupKey" name="groupKey" hidden aria-hidden="true"></select>
+          <select id="subKey" name="subKey" hidden aria-hidden="true"></select>
+          <label>
+            内容板块
+            <select id="admin-category" required>
+              <option value="loans">贷款</option>
+              <option value="articles">文章</option>
+              <option value="tools">工具链接</option>
+            </select>
+          </label>
+          <label id="loan-subsection-label">
+            贷款类型
+            <select id="loan-subkey"></select>
+          </label>
+          <label>
+            标题
+            <input id="title" name="title" type="text" placeholder="请输入内容标题" required />
+          </label>
+          <label>
+            摘要
+            <textarea id="summary" name="summary" rows="3" placeholder="列表与朋友圈分享卡片展示的摘要"></textarea>
+          </label>
+          <div class="upload-field">
+            <span class="upload-field__label">头图</span>
+            <div class="upload-field__actions">
+              <input id="shareImageFile" type="file" accept="image/*" />
+              <button id="clear-share-image" type="button" class="secondary-btn">清空头图</button>
+            </div>
+            <p class="upload-field__hint">分享朋友圈时会优先使用这里的头图；建议上传清晰横图，大小不超过 5MB。</p>
+            <div id="share-image-preview" class="image-preview" hidden>
+              <img id="share-image-preview-img" alt="头图预览" />
+              <span id="share-image-preview-text"></span>
+            </div>
+          </div>
+          <label>
+            正文内容
+            <textarea id="body" name="body" rows="8" placeholder="文章详情正文"></textarea>
+          </label>
+          <label>
+            外部链接
+            <input id="externalUrl" name="externalUrl" type="url" placeholder="可选，填写后可跳转外部地址" />
+          </label>
+          <input id="contentType" name="contentType" type="hidden" value="article" />
+          <input id="miniProgramName" name="miniProgramName" type="hidden" value="" />
+          <input id="miniProgramAppId" name="miniProgramAppId" type="hidden" value="" />
+          <input id="miniProgramPath" name="miniProgramPath" type="hidden" value="" />
+          <input id="miniProgramLaunchUrl" name="miniProgramLaunchUrl" type="hidden" value="" />
+          <input id="miniProgramNote" name="miniProgramNote" type="hidden" value="" />
+          <input id="shareImageUrl" name="shareImageUrl" type="hidden" value="" />
+
+          <div class="chip-row">
+            <button id="submit-btn" type="submit" class="primary-btn">新增内容</button>
+            <button id="cancel-edit" type="button" class="secondary-btn" hidden>取消编辑</button>
+          </div>
+        </form>
+        <p id="form-message" class="status-text"></p>
+      </section>
+
+      <section class="panel" id="content-management" data-admin-panel="content-management" hidden>
+        <div class="panel-head">
+          <div>
+            <h2>内容管理</h2>
+            <p class="hero-copy">先选择内容板块，再进入对应子版块查看文章列表，最后查看详细信息并执行编辑或删除。</p>
+          </div>
+        </div>
+        <div class="content-admin-browser">
+          <section class="panel analytics-subpanel">
+            <div class="panel-head">
+              <h3>1. 选择内容板块</h3>
+            </div>
+            <div id="content-category-nav" class="chip-row"></div>
+          </section>
+
+          <section class="panel analytics-subpanel">
+            <div class="panel-head">
+              <h3>2. 选择子版块</h3>
+            </div>
+            <div id="content-subsection-nav" class="chip-row"></div>
+          </section>
+
+          <section class="panel analytics-subpanel">
+            <div class="panel-head">
+              <h3>3. 文章列表</h3>
+            </div>
+            <div id="content-item-list" class="content-list"></div>
+          </section>
+
+          <section class="panel analytics-subpanel">
+            <div class="panel-head">
+              <h3>4. 详细信息</h3>
+            </div>
+            <div id="content-detail-view" class="content-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section hidden aria-hidden="true">
+        <form id="note-form">
+          <input id="note-title" name="title" type="text" />
+          <input id="note-category" name="category" type="text" />
+          <textarea id="note-body" name="body"></textarea>
+          <input id="note-pinned" name="pinned" type="checkbox" />
+          <button id="note-submit-btn" type="submit">note</button>
+          <button id="note-cancel-edit" type="button">cancel</button>
+        </form>
+        <p id="note-message"></p>
+        <input id="note-search" type="search" />
+        <div id="note-list"></div>
+      </section>
+
+      <section class="panel" id="vip-management" data-admin-panel="vip-management" hidden>
+        <div class="panel-head">
+          <div>
+            <h2>资源中心管理</h2>
+            <p class="hero-copy">
+              资源中心管理当前用于用户 VIP 权限管理，可查看会员状态、累计充值情况，并支持后台直接授予 VIP 时长。
+            </p>
+          </div>
+          <button id="refresh-vip-users" type="button" class="secondary-btn">刷新权限数据</button>
+        </div>
+
+        <form id="vip-grant-form" class="form-grid">
+          <label>
+            用户 ID
+            <input id="vip-user-id" name="userId" type="text" placeholder="例如：user-123456" required />
+          </label>
+          <label>
+            授予天数
+            <input id="vip-days" name="days" type="number" min="1" step="1" placeholder="例如：30" required />
+          </label>
+          <label>
+            备注
+            <textarea id="vip-notes" name="notes" rows="3" placeholder="例如：后台补发 / 人工开通"></textarea>
+          </label>
+          <div class="chip-row">
+            <button id="vip-submit-btn" type="submit" class="primary-btn">授予 VIP 时间</button>
+          </div>
+        </form>
+
+        <p id="vip-message" class="status-text"></p>
+        <div id="vip-overview" class="stats-grid"></div>
+        <div id="vip-user-list" class="content-list"></div>
+      </section>
+
+      <section class="panel" id="growth-management" data-admin-panel="growth-management" hidden>
+        <div class="panel-head">
+          <div>
+            <h2>成长中心管理</h2>
+            <p class="hero-copy">
+              每一行对应一个客户，展示头像、客户 ID、进行中的项目和已完成项目数量。点击“进入详情”可查看并修改每个项目。
+            </p>
+          </div>
+          <button id="refresh-growth-customers" type="button" class="secondary-btn">刷新成长系统</button>
+        </div>
+
+        <p id="growth-admin-message" class="status-text"></p>
+        <div id="growth-overview" class="stats-grid"></div>
+        <div id="growth-customer-list" class="content-list"></div>
+      </section>
+
+      <section class="panel" id="growth-customer-detail-panel" hidden data-admin-panel="growth-management">
+        <div class="panel-head">
+          <div>
+            <h2 id="growth-detail-title">客户项目详情</h2>
+            <p id="growth-detail-subtitle" class="hero-copy"></p>
+          </div>
+          <button id="close-growth-detail" type="button" class="secondary-btn">收起详情</button>
+        </div>
+
+        <form id="growth-add-project-form" class="form-grid">
+          <label>
+            新增项目名称
+            <input id="growth-add-project-name" name="loanProject" type="text" placeholder="例如：经营贷续贷" required />
+          </label>
+          <label>
+            金额
+            <input id="growth-add-project-amount" name="amount" type="text" placeholder="例如：120万" required />
+          </label>
+          <label>
+            详细信息
+            <textarea id="growth-add-project-details" name="details" rows="4" placeholder="补充当前项目情况" required></textarea>
+          </label>
+          <div class="chip-row">
+            <button id="growth-add-project-submit" type="submit" class="primary-btn">新增项目</button>
+          </div>
+        </form>
+
+        <div id="growth-project-list" class="content-list"></div>
+      </section>
+
+      <section class="panel" id="analytics-management" data-admin-panel="analytics-management" hidden>
+        <div class="panel-head">
+          <div>
+            <h2>用户痕迹管理</h2>
+            <p class="hero-copy">
+              查看访问用户、重点浏览板块和最近浏览记录，支持按用户删除痕迹或一键清空全部浏览数据。
+            </p>
+          </div>
+          <div class="chip-row">
+            <button id="refresh-analytics" type="button" class="secondary-btn">刷新数据</button>
+            <button id="clear-analytics" type="button" class="secondary-btn danger-btn">清空全部痕迹</button>
+          </div>
+        </div>
+
+        <p id="analytics-message" class="status-text"></p>
+
+        <div id="analytics-overview" class="stats-grid"></div>
+
+        <div class="panel analytics-subpanel">
+          <div class="panel-head">
+            <h3>板块浏览热度</h3>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>页面</th>
+                  <th>栏目</th>
+                  <th>板块</th>
+                  <th>总点击 / 占比</th>
+                  <th>总转发 / 占比</th>
+                  <th>涉及用户</th>
+                </tr>
+              </thead>
+              <tbody id="analytics-subsections"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel analytics-subpanel">
+          <div class="panel-head">
+            <h3>最近浏览记录</h3>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>用户</th>
+                  <th>页面</th>
+                  <th>板块</th>
+                  <th>内容</th>
+                  <th>动作</th>
+                  <th>来源</th>
+                </tr>
+              </thead>
+              <tbody id="analytics-events"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel analytics-subpanel">
+          <div class="panel-head">
+            <h3>用户浏览明细</h3>
+          </div>
+          <div id="analytics-users" class="content-list"></div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/admin.js"></script>
+  </body>
+</html>
