@@ -118,9 +118,9 @@ SITE_META = {
     ).strip(),
 }
 
-# Lock H5 -> mini program mapping to the existing project we already patched under
-# C:\Users\Administrator\Documents\jinxiang\golden-wx so production behavior is
-# stable even if stale env vars or old admin data exist.
+# Keep the default H5 -> mini program mapping pinned to the currently deployed
+# mini program configuration so production behavior stays stable even if stale
+# env vars or old admin data still exist.
 SITE_META["defaultMiniProgramName"] = "金象报告解析"
 SITE_META["defaultMiniProgramAppId"] = "wxc068fe791aa69ee7"
 SITE_META["defaultMiniProgramOriginalId"] = "gh_613042e245d1"
