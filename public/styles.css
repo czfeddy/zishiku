@@ -56,10 +56,16 @@ a {
   margin: 0 0 8px;
   color: var(--accent-dark);
   letter-spacing: 0.04em;
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
 }
 
 .breadcrumb__link {
   color: var(--accent-dark);
+  position: relative;
+  z-index: 3;
+  pointer-events: auto;
 }
 
 .breadcrumb__link:hover {
@@ -895,6 +901,19 @@ p {
     linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.96) 100%);
 }
 
+.content-item--interactive {
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.content-item--interactive:hover,
+.content-item--interactive:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+  border-color: rgba(37, 99, 235, 0.24);
+  outline: none;
+}
+
 .content-item:first-child {
   margin-top: 0;
 }
@@ -1391,6 +1410,10 @@ p {
   padding: 28px;
 }
 
+.share-access-card {
+  max-width: 720px;
+}
+
 .detail-contact-card {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -1517,6 +1540,85 @@ p {
 .detail-body {
   line-height: 1.8;
   white-space: pre-wrap;
+}
+
+.share-page-card {
+  display: grid;
+  gap: 22px;
+}
+
+.share-hero {
+  display: grid;
+  gap: 12px;
+}
+
+.share-hero__eyebrow {
+  margin: 0;
+  color: var(--accent-dark);
+  letter-spacing: 0.08em;
+}
+
+.share-hero__desc {
+  margin: 0;
+  max-width: 720px;
+  color: var(--muted);
+  line-height: 1.8;
+  font-size: 17px;
+}
+
+.share-hero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.share-hero__meta span {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--accent-dark);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.share-cover {
+  overflow: hidden;
+  border-radius: 24px;
+  border: 1px solid rgba(37, 99, 235, 0.12);
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+}
+
+.share-cover img {
+  width: 100%;
+  max-height: 420px;
+  object-fit: cover;
+  display: block;
+}
+
+.share-panel {
+  padding: 22px;
+  border-radius: 24px;
+  border: 1px solid rgba(37, 99, 235, 0.12);
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.08), transparent 34%),
+    linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+}
+
+.share-panel h2 {
+  margin-bottom: 12px;
+}
+
+.share-panel__body {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.9;
+  white-space: pre-wrap;
+}
+
+.share-page-card__actions {
+  justify-content: flex-start;
 }
 
 .checkbox-field {

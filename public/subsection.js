@@ -28,6 +28,58 @@ function decodeSegment(value) {
   }
 }
 
+function getPageLink(page) {
+  switch (String(page || "").trim()) {
+    case "recharge":
+      return "/recharge.html";
+    case "achievements":
+      return "/achievements.html";
+    case "notes":
+      return "/notes.html";
+    case "home":
+    default:
+      return "/";
+  }
+}
+
+function getGroupLink(page, groupKey) {
+  if (!page || !groupKey) {
+    return "/";
+  }
+
+  return `/section/${encodeURIComponent(page)}/${encodeURIComponent(groupKey)}`;
+}
+
+function getSubsectionLink(page, groupKey, subKey) {
+  if (!page || !groupKey || !subKey) {
+    return "/";
+  }
+
+  return `/section/${encodeURIComponent(page)}/${encodeURIComponent(groupKey)}/${encodeURIComponent(subKey)}`;
+}
+
+function renderBreadcrumb(meta) {
+  const pageLink = getPageLink(meta?.page);
+  const groupLink = getGroupLink(meta?.page, meta?.groupKey);
+  const subsectionLink = getSubsectionLink(meta?.page, meta?.groupKey, meta?.subKey);
+
+  return `
+    <nav class="breadcrumb" aria-label="面包屑导航">
+      <a class="breadcrumb__link" href="${escapeHtml(pageLink)}" data-breadcrumb-link="${escapeHtml(pageLink)}">${escapeHtml(
+        meta?.pageLabel || "首页"
+      )}</a>
+      <span class="breadcrumb__sep">/</span>
+      <a class="breadcrumb__link" href="${escapeHtml(groupLink)}" data-breadcrumb-link="${escapeHtml(groupLink)}">${escapeHtml(
+        meta?.groupLabel || "版块"
+      )}</a>
+      <span class="breadcrumb__sep">/</span>
+      <a class="breadcrumb__link" href="${escapeHtml(subsectionLink)}" data-breadcrumb-link="${escapeHtml(
+        subsectionLink
+      )}">${escapeHtml(meta?.subLabel || "子版块")}</a>
+    </nav>
+  `;
+}
+
 function isMiniProgramItem(item) {
   return item?.contentType === "mini-program";
 }
@@ -213,20 +265,19 @@ function getContentLink(item) {
 
 function renderSubsectionPage(meta, contents) {
   const root = document.getElementById("subsection-app");
-  const shareLabel = window.ShareHelper?.getShareActionLabel?.() || "分享链接";
-  const pageLabel = meta?.pageLabel || "内容";
-  const groupLabel = meta?.groupLabel || "板块";
-  const subLabel = meta?.subLabel || "分类";
-  document.title = `${subLabel} - ${window.SITE_META?.siteName || "知识库"}`;
+  const pageLabel = meta?.pageLabel || "\u5185\u5bb9";
+  const groupLabel = meta?.groupLabel || "\u677f\u5757";
+  const subLabel = meta?.subLabel || "\u5206\u7c7b";
+  document.title = `${subLabel} - ${window.SITE_META?.siteName || "\u77e5\u8bc6\u5e93"}`;
 
   if (!contents.length) {
     root.innerHTML = `
       <section class="detail-card">
-        <p class="eyebrow">${escapeHtml(pageLabel)} / ${escapeHtml(groupLabel)} / ${escapeHtml(subLabel)}</p>
+        ${renderBreadcrumb(meta)}
         <h1>${escapeHtml(subLabel)}</h1>
-        <p class="detail-meta">当前板块还没有内容，请先去后台发布文章。</p>
+        <p class="detail-meta">\u5f53\u524d\u677f\u5757\u8fd8\u6ca1\u6709\u5185\u5bb9\uff0c\u8bf7\u5148\u53bb\u540e\u53f0\u53d1\u5e03\u6587\u7ae0\u3002</p>
         <div class="chip-row" style="margin-top:20px">
-          <a class="chip" href="/">返回首页</a>
+          <a class="chip" href="/">\u8fd4\u56de\u9996\u9875</a>
         </div>
       </section>
     `;
@@ -235,53 +286,47 @@ function renderSubsectionPage(meta, contents) {
 
   root.innerHTML = `
     <section class="detail-card">
-      <p class="eyebrow">${escapeHtml(pageLabel)} / ${escapeHtml(groupLabel)} / ${escapeHtml(subLabel)}</p>
+      ${renderBreadcrumb(meta)}
       <h1>${escapeHtml(subLabel)}</h1>
-      <p class="detail-meta">共 ${contents.length} 篇内容。点击文章后会进入详情页，并自动展示当前注册用户自己填写的个性化名片。</p>
+      <p class="detail-meta">\u5171 ${contents.length} \u7bc7\u5185\u5bb9\uff0c\u70b9\u51fb\u5361\u7247\u5373\u53ef\u8fdb\u5165\u8be6\u60c5\u9875\u3002</p>
       ${contents
         .map((item, index) => {
           const link = getContentLink(item);
-          const openAction = isToolItem(item)
+          const itemAttributes = isToolItem(item)
             ? `
-              <button
-                type="button"
-                class="chip chip--primary"
-                data-open-tool="true"
-                data-page="${escapeHtml(item.page)}"
-                data-group-key="${escapeHtml(item.groupKey)}"
-                data-sub-key="${escapeHtml(item.subKey)}"
-                data-content-id="${escapeHtml(item.id)}"
-                data-content-slug="${escapeHtml(item.slug || "")}"
-                data-content-title="${escapeHtml(item.title)}"
-                data-content-type="${escapeHtml(item.contentType || "")}"
-                data-external-url="${escapeHtml(item.externalUrl || "")}"
-                data-mini-program-name="${escapeHtml(item.miniProgramName || "")}"
-                data-mini-program-app-id="${escapeHtml(item.miniProgramAppId || "")}"
-                data-mini-program-path="${escapeHtml(item.miniProgramPath || "")}"
-                data-mini-program-launch-url="${escapeHtml(item.miniProgramLaunchUrl || "")}"
-                data-mini-program-note="${escapeHtml(item.miniProgramNote || "")}"
-              >
-                ${escapeHtml(getActionText(item))}
-              </button>
+              data-open-tool="true"
+              data-page="${escapeHtml(item.page)}"
+              data-group-key="${escapeHtml(item.groupKey)}"
+              data-sub-key="${escapeHtml(item.subKey)}"
+              data-content-id="${escapeHtml(item.id)}"
+              data-content-slug="${escapeHtml(item.slug || "")}"
+              data-content-title="${escapeHtml(item.title)}"
+              data-content-type="${escapeHtml(item.contentType || "")}"
+              data-external-url="${escapeHtml(item.externalUrl || "")}"
+              data-mini-program-name="${escapeHtml(item.miniProgramName || "")}"
+              data-mini-program-app-id="${escapeHtml(item.miniProgramAppId || "")}"
+              data-mini-program-path="${escapeHtml(item.miniProgramPath || "")}"
+              data-mini-program-launch-url="${escapeHtml(item.miniProgramLaunchUrl || "")}"
+              data-mini-program-note="${escapeHtml(item.miniProgramNote || "")}"
             `
             : `
-              <a
-                class="chip chip--primary"
-                href="${escapeHtml(link)}"
-                data-open-content="true"
-                data-page="${escapeHtml(item.page)}"
-                data-group-key="${escapeHtml(item.groupKey)}"
-                data-sub-key="${escapeHtml(item.subKey)}"
-                data-content-id="${escapeHtml(item.id)}"
-                data-content-slug="${escapeHtml(item.slug || "")}"
-                data-content-title="${escapeHtml(item.title)}"
-              >
-                ${escapeHtml(getActionText(item))}
-              </a>
+              data-open-content="true"
+              data-content-link="${escapeHtml(link)}"
+              data-page="${escapeHtml(item.page)}"
+              data-group-key="${escapeHtml(item.groupKey)}"
+              data-sub-key="${escapeHtml(item.subKey)}"
+              data-content-id="${escapeHtml(item.id)}"
+              data-content-slug="${escapeHtml(item.slug || "")}"
+              data-content-title="${escapeHtml(item.title)}"
             `;
 
           return `
-            <article class="content-item">
+            <article
+              class="content-item content-item--interactive"
+              role="link"
+              tabindex="0"
+              ${itemAttributes}
+            >
               <div class="content-item__main">
                 <span class="content-item__serial">${String(index + 1).padStart(2, "0")}</span>
                 <div class="content-item__copy">
@@ -290,33 +335,8 @@ function renderSubsectionPage(meta, contents) {
                     <span class="content-item__hint">${escapeHtml(getActionHint(item))}</span>
                   </div>
                   <h3>${escapeHtml(item.title)}</h3>
-                  <p>${escapeHtml(item.summary || "当前内容暂无摘要。")}</p>
-                  <p class="detail-meta">发布时间：${formatDateTime(item.updatedAt || item.createdAt)}</p>
-                </div>
-              </div>
-              <div class="content-item__aside">
-                <div class="chip-row">
-                  ${openAction}
-                  ${
-                    item.slug
-                      ? `
-                        <button
-                          type="button"
-                          class="chip"
-                          data-share-moments="true"
-                          data-page="${escapeHtml(item.page)}"
-                          data-group-key="${escapeHtml(item.groupKey)}"
-                          data-sub-key="${escapeHtml(item.subKey)}"
-                          data-content-id="${escapeHtml(item.id)}"
-                          data-content-slug="${escapeHtml(item.slug || "")}"
-                          data-content-link="${escapeHtml(link)}"
-                          data-content-image="${escapeHtml(item.shareImageUrl || "")}"
-                        >
-                          分享朋友圈
-                        </button>
-                      `
-                      : ""
-                  }
+                  <p>${escapeHtml(item.summary || "\u5f53\u524d\u5185\u5bb9\u6682\u65e0\u6458\u8981\u3002")}</p>
+                  <p class="detail-meta">\u53d1\u5e03\u65f6\u95f4\uff1a${formatDateTime(item.updatedAt || item.createdAt)}</p>
                 </div>
               </div>
             </article>
@@ -324,14 +344,10 @@ function renderSubsectionPage(meta, contents) {
         })
         .join("")}
       <div class="chip-row" style="margin-top:20px">
-        <a class="chip" href="/">返回首页</a>
+        <a class="chip" href="/">\u8fd4\u56de\u9996\u9875</a>
       </div>
     </section>
   `;
-
-  root.querySelectorAll("[data-share-moments]").forEach((button) => {
-    button.textContent = shareLabel;
-  });
 }
 
 async function loadSubsectionPage() {
@@ -378,6 +394,9 @@ async function loadSubsectionPage() {
 
   renderSubsectionPage(
     {
+      page,
+      groupKey,
+      subKey,
       pageLabel: pageConfig.label,
       groupLabel: groupConfig.label,
       subLabel: subConfig.label
@@ -387,15 +406,19 @@ async function loadSubsectionPage() {
 }
 
 document.addEventListener("click", (event) => {
+  const breadcrumbLink = event.target.closest("[data-breadcrumb-link]");
+  if (breadcrumbLink) {
+    event.preventDefault();
+    event.stopPropagation();
+    window.location.assign(breadcrumbLink.dataset.breadcrumbLink || breadcrumbLink.getAttribute("href") || "/");
+    return;
+  }
+
   const toolButton = event.target.closest("[data-open-tool]");
   if (toolButton) {
     openToolItem({
-      page: toolButton.dataset.page,
-      groupKey: toolButton.dataset.groupKey,
-      subKey: toolButton.dataset.subKey,
-      id: toolButton.dataset.contentId,
-      slug: toolButton.dataset.contentSlug,
       title: toolButton.dataset.contentTitle,
+      slug: toolButton.dataset.contentSlug,
       contentType: toolButton.dataset.contentType,
       externalUrl: toolButton.dataset.externalUrl,
       miniProgramName: toolButton.dataset.miniProgramName,
@@ -420,59 +443,24 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  const shareButton = event.target.closest("[data-share-moments]");
-  if (shareButton) {
-    if (!window.ShareHelper?.prepareAndPromptShare) {
-      window.alert("分享模块加载失败，请刷新页面后重试。");
-      return;
+  const contentCard = event.target.closest("[data-open-content]");
+  if (contentCard) {
+    if (window.AnalyticsTracker) {
+      window.AnalyticsTracker.trackSectionView({
+        page: contentCard.dataset.page,
+        groupKey: contentCard.dataset.groupKey,
+        subKey: contentCard.dataset.subKey,
+        action: "click",
+        contentId: contentCard.dataset.contentId,
+        contentSlug: contentCard.dataset.contentSlug,
+        contentTitle: contentCard.dataset.contentTitle,
+        source: "subsection-content-card"
+      }).catch(() => {});
     }
 
-    const contentItem = shareButton.closest(".content-item");
-    const title = contentItem?.querySelector("h3")?.textContent?.trim() || "";
-    const summary = contentItem?.querySelector("p")?.textContent?.trim() || "";
-
-    window.ShareHelper.showToast?.("正在准备分享...");
-    window.ShareHelper.prepareAndPromptShare({
-      title,
-      desc: summary,
-      link: shareButton.dataset.contentLink,
-      imgUrl: shareButton.dataset.contentImage,
-      shareMode: "moments",
-      forceRefresh: true
-    }).then((result) => {
-      if (
-        !window.AnalyticsTracker ||
-        !["wechat-guide", "manual-guide", "system-share", "copy-link"].includes(result?.method)
-      ) {
-        return;
-      }
-
-      window.AnalyticsTracker.trackSectionView({
-        page: shareButton.dataset.page,
-        groupKey: shareButton.dataset.groupKey,
-        subKey: shareButton.dataset.subKey,
-        action: "share",
-        contentId: shareButton.dataset.contentId,
-        contentSlug: shareButton.dataset.contentSlug,
-        contentTitle: title,
-        source: "subsection-share-guide"
-      }).catch(() => {});
-    });
-    return;
-  }
-
-  const contentLink = event.target.closest("[data-open-content]");
-  if (contentLink && window.AnalyticsTracker) {
-    window.AnalyticsTracker.trackSectionView({
-      page: contentLink.dataset.page,
-      groupKey: contentLink.dataset.groupKey,
-      subKey: contentLink.dataset.subKey,
-      action: "click",
-      contentId: contentLink.dataset.contentId,
-      contentSlug: contentLink.dataset.contentSlug,
-      contentTitle: contentLink.dataset.contentTitle,
-      source: "subsection-content-link"
-    }).catch(() => {});
+    if (contentCard.dataset.contentLink) {
+      window.location.href = contentCard.dataset.contentLink;
+    }
     return;
   }
 
@@ -482,12 +470,26 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-copy-tool-name]")) {
-    copyText(dialog.dataset.name, "小程序名称已复制，请打开微信后直接粘贴搜索。");
+    copyText(dialog.dataset.name, "\u5c0f\u7a0b\u5e8f\u540d\u79f0\u5df2\u590d\u5236\uff0c\u8bf7\u6253\u5f00\u5fae\u4fe1\u540e\u76f4\u63a5\u7c98\u8d34\u641c\u7d22\u3002");
   } else if (event.target.closest("[data-copy-tool-path]")) {
-    copyText(dialog.dataset.path, "小程序路径已复制。");
+    copyText(dialog.dataset.path, "\u5c0f\u7a0b\u5e8f\u8def\u5f84\u5df2\u590d\u5236\u3002");
   } else if (event.target.closest("[data-open-wechat]")) {
     window.location.href = "weixin://";
   }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") {
+    return;
+  }
+
+  const interactiveCard = event.target.closest("[data-open-content], [data-open-tool]");
+  if (!interactiveCard) {
+    return;
+  }
+
+  event.preventDefault();
+  interactiveCard.click();
 });
 
 loadSubsectionPage().catch(() => {

@@ -14,7 +14,8 @@ Page({
     loading: true,
     error: "",
     canOpenWebview: false,
-    content: fallbackContent
+    content: fallbackContent,
+    autoOpening: false
   },
 
   onLoad(query) {
@@ -25,6 +26,9 @@ Page({
     }
 
     const slug = String(query.slug || config.defaultContentSlug).trim();
+    const autoOpen = String(query.autoOpen || "1").trim() !== "0";
+    this.autoOpenOnReady = autoOpen;
+    this.hasAutoOpened = false;
     this.loadContent(slug);
   },
 
@@ -32,7 +36,7 @@ Page({
     const { content } = this.data;
     return {
       title: content.title,
-      path: `/pages/h5-share-shell/h5-share-shell?slug=${encodeURIComponent(content.slug)}`,
+      path: `/pages/h5-share-shell/h5-share-shell?slug=${encodeURIComponent(content.slug)}&autoOpen=1`,
       imageUrl: content.shareImageUrl
     };
   },
@@ -41,7 +45,7 @@ Page({
     const { content } = this.data;
     return {
       title: content.title,
-      query: `slug=${encodeURIComponent(content.slug)}`,
+      query: `slug=${encodeURIComponent(content.slug)}&autoOpen=1`,
       imageUrl: content.shareImageUrl
     };
   },
@@ -57,13 +61,16 @@ Page({
       this.setData({
         loading: false,
         canOpenWebview: true,
+        autoOpening: false,
         content
       });
+      this.tryAutoOpenWebview();
     } catch (error) {
       this.setData({
         loading: false,
         error: error?.errMsg || error?.message || "Content load failed. Falling back to local sample data.",
         canOpenWebview: false,
+        autoOpening: false,
         content: fallbackContent
       });
     }
@@ -74,9 +81,34 @@ Page({
   },
 
   handleOpenWebview() {
+    this.openWebview();
+  },
+
+  tryAutoOpenWebview() {
+    if (!this.autoOpenOnReady || this.hasAutoOpened || !this.data.canOpenWebview) {
+      return;
+    }
+
+    this.hasAutoOpened = true;
+    this.openWebview();
+  },
+
+  openWebview() {
     const targetUrl = buildWebviewUrl(this.data.content);
-    wx.navigateTo({
-      url: `/pages/webview/index?src=${encodeURIComponent(targetUrl)}`
+    this.setData({
+      autoOpening: true
+    });
+    wx.redirectTo({
+      url: `/pages/webview/index?src=${encodeURIComponent(targetUrl)}`,
+      fail: () => {
+        this.hasAutoOpened = false;
+        this.setData({
+          autoOpening: false
+        });
+        wx.navigateTo({
+          url: `/pages/webview/index?src=${encodeURIComponent(targetUrl)}`
+        });
+      }
     });
   },
 

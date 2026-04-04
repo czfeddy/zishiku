@@ -60,6 +60,9 @@ WECHAT_APP_SECRET = str(os.getenv("WECHAT_APP_SECRET", "")).strip()
 WECHAT_API_HOST = "https://api.weixin.qq.com"
 WECHAT_PAY_API_HOST = "https://api.mch.weixin.qq.com"
 WECHAT_PAY_APP_ID = str(os.getenv("WECHAT_PAY_APP_ID", WECHAT_APP_ID)).strip()
+MINI_PROGRAM_APP_SECRET = str(os.getenv("MINI_PROGRAM_APP_SECRET", "")).strip()
+MINI_PROGRAM_ENV_VERSION = str(os.getenv("MINI_PROGRAM_ENV_VERSION", "release")).strip().lower() or "release"
+MINI_PROGRAM_URL_LINK_EXPIRE_DAYS = min(max(int(os.getenv("MINI_PROGRAM_URL_LINK_EXPIRE_DAYS", "30") or "30"), 1), 30)
 WECHAT_PAY_MCH_ID = str(os.getenv("WECHAT_PAY_MCH_ID", "")).strip()
 WECHAT_PAY_SERIAL_NO = str(os.getenv("WECHAT_PAY_SERIAL_NO", "")).strip()
 WECHAT_PAY_NOTIFY_URL = str(os.getenv("WECHAT_PAY_NOTIFY_URL", "")).strip()
@@ -89,6 +92,8 @@ WECHAT_CACHE = {
     "access_token_expires_at": 0,
     "jsapi_ticket": "",
     "jsapi_ticket_expires_at": 0,
+    "mini_program_access_token": "",
+    "mini_program_access_token_expires_at": 0,
 }
 SITE_META = {
     "siteName": str(os.getenv("SITE_NAME", "知识库")).strip(),
@@ -670,6 +675,22 @@ def fetch_remote_json(path: str, params: dict):
         return json.loads(response.read().decode("utf-8"))
 
 
+def post_remote_json(path: str, payload: dict):
+    body = json.dumps(payload or {}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    request = Request(
+        f"{WECHAT_API_HOST}{path}",
+        data=body,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "zhishiku-h5-python/1.0",
+        },
+        method="POST",
+    )
+    with urlopen(request, timeout=12) as response:
+        return json.loads(response.read().decode("utf-8") or "{}")
+
+
 def get_request_origin(handler: BaseHTTPRequestHandler):
     forwarded_proto = str(handler.headers.get("X-Forwarded-Proto", "")).split(",")[0].strip()
     protocol = forwarded_proto or "http"
@@ -838,6 +859,44 @@ def get_wechat_jsapi_ticket():
     WECHAT_CACHE["jsapi_ticket"] = ticket
     WECHAT_CACHE["jsapi_ticket_expires_at"] = now + max(expires_in - 120, 60)
     return ticket
+
+
+def is_mini_program_url_link_configured():
+    return bool(str(SITE_META.get("defaultMiniProgramAppId", "")).strip() and MINI_PROGRAM_APP_SECRET)
+
+
+def get_mini_program_access_token():
+    now = time.time()
+    if (
+        WECHAT_CACHE["mini_program_access_token"]
+        and WECHAT_CACHE["mini_program_access_token_expires_at"] > now
+    ):
+        return WECHAT_CACHE["mini_program_access_token"]
+
+    result = fetch_remote_json(
+        "/cgi-bin/token",
+        {
+            "grant_type": "client_credential",
+            "appid": str(SITE_META.get("defaultMiniProgramAppId", "")).strip(),
+            "secret": MINI_PROGRAM_APP_SECRET,
+        },
+    )
+
+    if not result.get("access_token"):
+        errcode = int(result.get("errcode", 0) or 0)
+        if errcode == 40013:
+            raise RuntimeError("invalid mini program appid")
+        if errcode == 40125:
+            raise RuntimeError("invalid mini program appsecret")
+        if errcode == 40164:
+            raise RuntimeError("wechat api invalid ip: current server IP is not in the WeChat whitelist")
+        raise RuntimeError(result.get("errmsg") or "failed to fetch mini program access_token")
+
+    token = str(result.get("access_token", "")).strip()
+    expires_in = int(result.get("expires_in", 7200) or 7200)
+    WECHAT_CACHE["mini_program_access_token"] = token
+    WECHAT_CACHE["mini_program_access_token_expires_at"] = now + max(expires_in - 300, 60)
+    return token
 
 
 def build_wechat_signature(target_url: str):
@@ -1235,6 +1294,15 @@ def build_content_share_path(content: dict):
     return f"/content/{slug}?sharev={share_version}" if share_version else f"/content/{slug}"
 
 
+def build_content_public_share_path(content: dict):
+    slug = quote(str(content.get("slug", "")).strip(), safe="")
+    return f"/share/{slug}" if slug else ""
+
+
+def build_content_share_entry_path(content: dict):
+    return build_content_public_share_path(content)
+
+
 def build_content_mini_program_path(content: dict):
     share_page = str(SITE_META.get("defaultMiniProgramSharePage", "")).strip()
     slug = str(content.get("slug", "")).strip()
@@ -1269,6 +1337,84 @@ def build_content_mini_program_launch_url(content: dict):
     return launch_url
 
 
+def split_mini_program_path(raw_path: str):
+    value = str(raw_path or "").strip()
+    if not value:
+        return "", ""
+
+    parsed = urlparse(value)
+    path = parsed.path or value.split("?", 1)[0].strip()
+    query = parsed.query
+    if not query and "?" in value:
+        query = value.split("?", 1)[1].strip()
+    return path.strip(), query.strip()
+
+
+def generate_mini_program_url_link(content: dict):
+    if not is_mini_program_url_link_configured():
+        return ""
+
+    path, query = split_mini_program_path(build_content_mini_program_path(content))
+    if not path:
+        return ""
+
+    access_token = get_mini_program_access_token()
+    result = post_remote_json(
+        f"/wxa/generate_urllink?access_token={quote(access_token, safe='')}",
+        {
+            "path": path,
+            "query": query,
+            "env_version": MINI_PROGRAM_ENV_VERSION,
+            "expire_type": 1,
+            "expire_interval": MINI_PROGRAM_URL_LINK_EXPIRE_DAYS,
+        },
+    )
+
+    url_link = str(result.get("url_link", "")).strip()
+    if url_link:
+        return url_link
+
+    errcode = int(result.get("errcode", 0) or 0)
+    if errcode == 40125:
+        raise RuntimeError("invalid mini program appsecret")
+    if errcode == 40164:
+        raise RuntimeError("wechat api invalid ip: current server IP is not in the WeChat whitelist")
+    raise RuntimeError(result.get("errmsg") or "failed to generate mini program url link")
+
+
+def ensure_content_mini_program_fields(data: dict, content: dict):
+    if not isinstance(content, dict):
+        return content
+
+    changed = False
+    mini_program_path = str(content.get("miniProgramPath", "")).strip()
+    if not mini_program_path:
+        mini_program_path = build_content_mini_program_path(content)
+        if mini_program_path:
+            content["miniProgramPath"] = mini_program_path
+            changed = True
+
+    launch_url = str(content.get("miniProgramLaunchUrl", "")).strip()
+    if not launch_url:
+        try:
+            launch_url = generate_mini_program_url_link(content)
+        except Exception as error:
+            print(f"[mini-program] failed to generate url link for {content.get('slug') or content.get('id')}: {error}")
+            launch_url = ""
+
+        if not launch_url:
+            launch_url = build_content_mini_program_launch_url(content)
+
+        if launch_url:
+            content["miniProgramLaunchUrl"] = launch_url
+            changed = True
+
+    if changed:
+        write_data(data)
+
+    return content
+
+
 def enrich_content_item(content: dict):
     current = dict(content or {})
     mini_program_path = str(current.get("miniProgramPath", "")).strip() or build_content_mini_program_path(current)
@@ -1279,6 +1425,9 @@ def enrich_content_item(content: dict):
     return {
         **current,
         "link": build_content_share_path(current),
+        "detailLink": build_content_share_path(current),
+        "sharePublicLink": build_content_public_share_path(current),
+        "shareEntryLink": build_content_share_entry_path(current),
         "miniProgramName": str(current.get("miniProgramName", "")).strip()
         or str(SITE_META.get("defaultMiniProgramName", "")).strip(),
         "miniProgramAppId": str(current.get("miniProgramAppId", "")).strip()
@@ -1292,7 +1441,7 @@ def enrich_content_item(content: dict):
     }
 
 
-def build_content_page_meta(handler: BaseHTTPRequestHandler, content: dict):
+def build_content_page_meta(handler: BaseHTTPRequestHandler, content: dict, *, page_kind: str = "detail"):
     site_name = str(SITE_META.get("siteName", "")).strip() or "知识库"
     title = str(content.get("title", "")).strip() or site_name
     page_title = f"{title} - {site_name}" if title and site_name else title or site_name
@@ -1302,7 +1451,8 @@ def build_content_page_meta(handler: BaseHTTPRequestHandler, content: dict):
         or f"{title or site_name}，来自{site_name}"
     )
     origin = get_request_origin(handler)
-    url = urljoin(origin, handler.path or build_content_share_path(content))
+    target_path = build_content_public_share_path(content) if page_kind == "share" else build_content_share_path(content)
+    url = urljoin(origin, target_path or handler.path or "/")
     image = urljoin(origin, str(content.get("shareImageUrl") or SITE_META.get("defaultShareImage") or "").strip())
 
     return {
@@ -1315,9 +1465,9 @@ def build_content_page_meta(handler: BaseHTTPRequestHandler, content: dict):
     }
 
 
-def render_detail_html(handler: BaseHTTPRequestHandler, content: dict):
-    template = (PUBLIC_DIR / "detail.html").read_text(encoding="utf-8")
-    meta = build_content_page_meta(handler, content)
+def render_content_html(handler: BaseHTTPRequestHandler, content: dict, *, template_name: str, page_kind: str):
+    template = (PUBLIC_DIR / template_name).read_text(encoding="utf-8")
+    meta = build_content_page_meta(handler, content, page_kind=page_kind)
     meta_tags = [
         f'<meta name="description" content="{escape(meta["description"], quote=True)}" />',
         '<meta property="og:type" content="article" />',
@@ -1335,10 +1485,48 @@ def render_detail_html(handler: BaseHTTPRequestHandler, content: dict):
         f'<meta name="twitter:description" content="{escape(meta["description"], quote=True)}" />',
         f'<meta name="twitter:image" content="{escape(meta["image"], quote=True)}" />' if meta["image"] else "",
         f'<link rel="canonical" href="{escape(meta["url"], quote=True)}" />',
+        '<meta name="robots" content="noindex,nofollow" />' if page_kind == "share" else "",
     ]
     head_markup = "\n    ".join(item for item in meta_tags if item)
     html = re.sub(r"<title>[\s\S]*?</title>", f"<title>{escape(meta['pageTitle'])}</title>", template, count=1)
     return html.replace("</head>", f"    {head_markup}\n  </head>", 1)
+
+
+def render_detail_html(handler: BaseHTTPRequestHandler, content: dict):
+    return render_content_html(handler, content, template_name="detail.html", page_kind="detail")
+
+
+def render_share_html(handler: BaseHTTPRequestHandler, content: dict):
+    return render_content_html(handler, content, template_name="share.html", page_kind="share")
+
+
+def render_share_access_denied_html(content: dict | None = None):
+    detail_link = build_content_share_path(content or {}) or "/"
+    title = escape(str((content or {}).get("title", "")).strip())
+    hint = f"如果你要分享《{title}》，请先进入正文页，再点击“去分享页”。" if title else "请先进入正文页，再点击“去分享页”。"
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>请先从正文页进入</title>
+    <link rel="stylesheet" href="/styles.css?v=20260403d" />
+    <meta name="robots" content="noindex,nofollow" />
+  </head>
+  <body data-title="分享页访问受限">
+    <main class="detail-shell">
+      <section class="detail-card share-access-card">
+        <p class="eyebrow">分享页入口控制</p>
+        <h1>请先从正文页进入分享页</h1>
+        <p class="detail-meta">当前分享页只允许通过正文页跳转、微信卡片打开或后端直出访问。</p>
+        <p class="detail-body">{hint}</p>
+        <div class="chip-row" style="margin-top:20px;justify-content:flex-start">
+          <a class="chip chip--primary" href="{escape(detail_link, quote=True)}">打开正文页</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>"""
 
 
 def build_upload_filename(original_name: str, content_type: str):
@@ -1789,6 +1977,8 @@ class AppHandler(BaseHTTPRequestHandler):
             if sub_key:
                 contents = [item for item in contents if item["subKey"] == sub_key]
 
+            for item in contents:
+                ensure_content_mini_program_fields(data, item)
             return respond_json(200, {"contents": [enrich_content_item(item) for item in contents]})
 
         if route == "/api/notes":
@@ -1954,6 +2144,7 @@ class AppHandler(BaseHTTPRequestHandler):
             if not content:
                 return respond_json(404, {"message": "content not found"})
 
+            content = ensure_content_mini_program_fields(data, content)
             meta = resolve_meta(data, content["page"], content["groupKey"], content["subKey"]) or {}
             return respond_json(200, {"content": {**enrich_content_item(content), **meta}})
 
@@ -1968,10 +2159,25 @@ class AppHandler(BaseHTTPRequestHandler):
             content = next((item for item in data["contents"] if item.get("slug") == slug), None)
             if not content:
                 return send_file(self, PUBLIC_DIR / "detail.html")
+            content = ensure_content_mini_program_fields(data, content)
             return send_html(self, render_detail_html(self, content))
 
+        if route.startswith("/share/"):
+            slug = route.replace("/share/", "", 1).strip()
+            data = read_data()
+            content = next((item for item in data["contents"] if item.get("slug") == slug), None)
+            if not content:
+                return send_file(self, PUBLIC_DIR / "share.html")
+            content = ensure_content_mini_program_fields(data, content)
+            return send_html(self, render_share_html(self, content), include_body=include_body)
+
         if route.startswith("/section/"):
-            return respond_file(PUBLIC_DIR / "subsection.html")
+            section_parts = [part for part in route.split("/") if part]
+            if len(section_parts) == 3:
+                return respond_file(PUBLIC_DIR / "group.html")
+            if len(section_parts) >= 4:
+                return respond_file(PUBLIC_DIR / "subsection.html")
+            return respond_file(PUBLIC_DIR / "index.html")
 
         if route == "/":
             return respond_file(PUBLIC_DIR / "index.html")

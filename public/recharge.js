@@ -101,7 +101,7 @@ function renderPage(plans, user) {
               微信支付
             </button>
             <button class="secondary-btn" type="button" data-create-order="alipay" data-plan-key="${plan.key}">
-              支付宝支付（待接入）
+              支付宝支付
             </button>
           </div>
         </article>
@@ -143,8 +143,9 @@ function renderPage(plans, user) {
     <section class="section-block recharge-notes">
       <h2>支付接入说明</h2>
       <p>微信支付已经接入到当前 H5 页面，点击后会创建真实订单并跳转到微信支付中间页。</p>
+      <p>支付宝支付现已接入到当前 H5 页面，点击后会跳转支付宝收银台完成付款。</p>
       <p>支付完成回跳本页后，会自动查询订单状态并发放对应 VIP 时长。</p>
-      <p>当前支付链路保持为纯 H5 微信支付，与公众号授权和小程序能力无关。</p>
+      <p>当前支付链路保持为纯 H5 支付，与公众号授权和小程序能力无关。</p>
     </section>
   `;
 }
@@ -188,11 +189,6 @@ async function refreshPageAndStatus(orderId) {
 }
 
 async function createOrder(planKey, paymentMethod) {
-  if (paymentMethod === "alipay") {
-    setMessage("支付宝支付入口已预留，后续可以直接接入真实支付宝网关。", "info");
-    return;
-  }
-
   try {
     setMessage(`正在创建${paymentMethod === "wechat" ? "微信" : "支付宝"}支付订单...`, "info");
 
@@ -217,6 +213,12 @@ async function createOrder(planKey, paymentMethod) {
     if (paymentMethod === "wechat" && result.payment?.h5Url && result.order?.id) {
       setMessage("订单已创建，正在跳转微信支付...", "info");
       window.location.href = buildWechatPayUrl(result.payment.h5Url, buildWechatReturnUrl(result.order.id));
+      return;
+    }
+
+    if (paymentMethod === "alipay" && result.payment?.h5Url) {
+      setMessage("订单已创建，正在跳转支付宝支付...", "info");
+      window.location.href = result.payment.h5Url;
       return;
     }
 

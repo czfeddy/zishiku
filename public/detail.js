@@ -35,9 +35,11 @@ function getPageLink(page) {
 }
 
 function getGroupLink(content) {
-  const pageLink = getPageLink(content?.page);
-  const groupKey = String(content?.groupKey || "").trim();
-  return groupKey ? `${pageLink}#group-${encodeURIComponent(groupKey)}` : pageLink;
+  if (!content?.page || !content?.groupKey) {
+    return "/";
+  }
+
+  return `/section/${encodeURIComponent(content.page)}/${encodeURIComponent(content.groupKey)}`;
 }
 
 function getSubsectionLink(content) {
@@ -87,6 +89,23 @@ function buildMiniProgramMeta(content) {
     miniProgramLaunchUrl,
     miniProgramNote
   };
+}
+
+function getPreferredMomentsShareLink(content) {
+  const externalUrl = String(content?.externalUrl || "").trim();
+  if (/^https:\/\/mp\.weixin\.qq\.com\//i.test(externalUrl)) {
+    return externalUrl;
+  }
+
+  return String(content?.link || "").trim();
+}
+
+function hasOfficialAccountArticleLink(content) {
+  return /^https:\/\/mp\.weixin\.qq\.com\//i.test(String(content?.externalUrl || "").trim());
+}
+
+function getMiniProgramLaunchUrl(content) {
+  return String(content?.miniProgramLaunchUrl || "").trim();
 }
 
 function renderMiniProgramBridge(content) {
@@ -296,7 +315,9 @@ function renderDetail(content, userProfile) {
   const externalLink = content.externalUrl
     ? `<a class="chip" href="${escapeHtml(content.externalUrl)}" target="_blank" rel="noreferrer">\u6253\u5f00\u5916\u90e8\u94fe\u63a5</a>`
     : "";
-  const shareLabel = window.ShareHelper?.getShareActionLabel?.() || "\u5206\u4eab\u94fe\u63a5";
+  const shareLabel = getMiniProgramLaunchUrl(content)
+    ? "\u6253\u5f00\u5c0f\u7a0b\u5e8f\u5206\u4eab\u7248"
+    : "\u67e5\u770b\u5c0f\u7a0b\u5e8f\u6253\u5f00\u65b9\u5f0f";
 
   return `
     <section class="detail-card">
@@ -311,7 +332,7 @@ function renderDetail(content, userProfile) {
         <a class="chip" href="${escapeHtml(getSubsectionLink(content))}">\u8fd4\u56de\u5217\u8868</a>
         ${
           canShareContent(content)
-            ? `<button type="button" class="chip" id="share-moments-btn">${escapeHtml(shareLabel)}</button>`
+            ? `<button type="button" class="chip chip--primary" id="share-moments-btn">${escapeHtml(shareLabel)}</button>`
             : ""
         }
         ${externalLink}
@@ -324,36 +345,28 @@ function bindCardActions(content) {
   const shareButton = document.getElementById("share-moments-btn");
   if (shareButton) {
     shareButton.addEventListener("click", () => {
-      if (!window.ShareHelper?.prepareAndPromptShare) {
-        window.alert("分享模块加载失败，请刷新页面后重试。");
+      const launchUrl = getMiniProgramLaunchUrl(content);
+      if (!launchUrl) {
+        const miniProgramPath = String(content.miniProgramPath || "").trim();
+        if (miniProgramPath) {
+          window.alert(`当前暂时无法直接拉起小程序，请先在微信里打开。\n\n小程序路径：${miniProgramPath}`);
+        } else {
+          window.alert("小程序分享版还没准备好，请刷新页面后重试。");
+        }
         return;
       }
 
-      window.ShareHelper.showToast?.("正在准备分享...");
-      window.ShareHelper.prepareAndPromptShare({
-        title: content.title,
-        desc: content.summary,
-        link: content.link,
-        imgUrl: content.shareImageUrl,
-        shareMode: "moments"
-      }).then((result) => {
-        if (
-          !window.AnalyticsTracker ||
-          !["wechat-guide", "manual-guide", "system-share", "copy-link"].includes(result?.method)
-        ) {
-          return;
-        }
+      window.AnalyticsTracker?.trackSectionView({
+        page: content.page,
+        groupKey: content.groupKey,
+        subKey: content.subKey,
+        contentId: content.id,
+        contentSlug: content.slug,
+        contentTitle: content.title,
+        source: "mini-program-share-entry"
+      }).catch(() => {});
 
-        window.AnalyticsTracker.trackSectionView({
-          page: content.page,
-          groupKey: content.groupKey,
-          subKey: content.subKey,
-          contentId: content.id,
-          contentSlug: content.slug,
-          contentTitle: content.title,
-          source: "wechat-share-guide"
-        }).catch(() => {});
-      });
+      window.location.href = launchUrl;
     });
   }
 
@@ -469,24 +482,6 @@ async function loadDetail() {
   };
 
   renderPage();
-
-  if (window.ShareHelper && canShareContent(content)) {
-    window.ShareHelper.updateShareMeta?.({
-      title: content.title,
-      desc: content.summary,
-      link: content.link,
-      imgUrl: content.shareImageUrl,
-      shareMode: "moments"
-    });
-    window.ShareHelper.applyWechatShareData({
-      title: content.title,
-      desc: content.summary,
-      link: content.link,
-      imgUrl: content.shareImageUrl,
-      shareMode: "moments",
-      forceRefresh: true
-    }).catch(() => {});
-  }
 
   if (window.AnalyticsTracker?.subscribeUserState) {
     window.AnalyticsTracker.subscribeUserState((state) => {

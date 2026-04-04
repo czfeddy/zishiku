@@ -96,6 +96,7 @@ const port = process.env.PORT || 3000;
 const publicDir = path.join(__dirname, "public");
 const uploadsDir = path.join(publicDir, "uploads");
 const detailHtmlTemplate = fs.readFileSync(path.join(publicDir, "detail.html"), "utf8");
+const shareHtmlTemplate = fs.readFileSync(path.join(publicDir, "share.html"), "utf8");
 const dataDir = path.join(__dirname, "data");
 const dataFile = path.join(dataDir, "content.json");
 const analyticsFile = path.join(dataDir, "analytics.json");
@@ -106,6 +107,23 @@ const wechatAppSecret = String(process.env.WECHAT_APP_SECRET || "").trim();
 const wechatApiHost = "api.weixin.qq.com";
 const wechatPayApiHost = "api.mch.weixin.qq.com";
 const wechatPayAppId = String(process.env.WECHAT_PAY_APP_ID || wechatAppId || "").trim();
+const miniProgramName = String(process.env.MINI_PROGRAM_NAME || "金象报告解析").trim();
+const miniProgramAppId = String(process.env.MINI_PROGRAM_APP_ID || "wxc068fe791aa69ee7").trim();
+const miniProgramAppSecret = String(process.env.MINI_PROGRAM_APP_SECRET || "").trim();
+const miniProgramOriginalId = String(process.env.MINI_PROGRAM_ORIGINAL_ID || "gh_613042e245d1").trim();
+const miniProgramSharePage =
+  String(process.env.MINI_PROGRAM_SHARE_PAGE || "/pages/h5-share-shell/h5-share-shell").trim() ||
+  "/pages/h5-share-shell/h5-share-shell";
+const miniProgramNote = String(
+  process.env.MINI_PROGRAM_NOTE ||
+    "当前内容已映射到现有小程序的分享壳页面，可直接打开小程序分享版后再转发朋友圈。"
+).trim();
+const miniProgramEnvVersion =
+  String(process.env.MINI_PROGRAM_ENV_VERSION || "release").trim().toLowerCase() || "release";
+const miniProgramUrlLinkExpireDays = Math.min(
+  Math.max(Number(process.env.MINI_PROGRAM_URL_LINK_EXPIRE_DAYS || 30) || 30, 1),
+  30
+);
 const wechatPayMerchantId = String(process.env.WECHAT_PAY_MCH_ID || "").trim();
 const wechatPayMerchantSerialNo = String(process.env.WECHAT_PAY_SERIAL_NO || "").trim();
 const wechatPayPrivateKey = loadPemValue(
@@ -113,6 +131,14 @@ const wechatPayPrivateKey = loadPemValue(
   process.env.WECHAT_PAY_PRIVATE_KEY_PATH
 );
 const wechatPayNotifyUrl = String(process.env.WECHAT_PAY_NOTIFY_URL || "").trim();
+const alipayGatewayHost = normalizeHostname(process.env.ALIPAY_GATEWAY_HOST || "openapi.alipay.com") || "openapi.alipay.com";
+const alipayGatewayPath = String(process.env.ALIPAY_GATEWAY_PATH || "/gateway.do").trim() || "/gateway.do";
+const alipayAppId = String(process.env.ALIPAY_APP_ID || "").trim();
+const alipayPrivateKey = loadPemValue(
+  process.env.ALIPAY_PRIVATE_KEY,
+  process.env.ALIPAY_PRIVATE_KEY_PATH
+);
+const alipayNotifyUrl = String(process.env.ALIPAY_NOTIFY_URL || "").trim();
 const domainHost = normalizeHostname(process.env.DOMAIN || "");
 const wechatAllowedHosts = parseHostnameList(process.env.WECHAT_ALLOWED_HOSTS || "", {
   fallbackHosts: domainHost ? [domainHost] : []
@@ -133,6 +159,11 @@ const siteMeta = {
   contactEmail: String(process.env.CONTACT_EMAIL || "").trim(),
   contactPhone: String(process.env.CONTACT_PHONE || "").trim(),
   defaultShareImage: String(process.env.DEFAULT_SHARE_IMAGE || "").trim(),
+  defaultMiniProgramName: miniProgramName,
+  defaultMiniProgramAppId: miniProgramAppId,
+  defaultMiniProgramOriginalId: miniProgramOriginalId,
+  defaultMiniProgramSharePage: miniProgramSharePage,
+  defaultMiniProgramNote: miniProgramNote,
   wechatShareAllowedHosts: Array.from(wechatShareAllowedHosts)
 };
 const wechatTicketCache = {
@@ -140,6 +171,10 @@ const wechatTicketCache = {
   accessTokenExpiresAt: 0,
   jsapiTicket: "",
   jsapiTicketExpiresAt: 0
+};
+const miniProgramTokenCache = {
+  accessToken: "",
+  accessTokenExpiresAt: 0
 };
 let wechatRedisClient = null;
 let wechatRedisConnectPromise = null;
@@ -214,9 +249,35 @@ function getWechatPayNotifyUrl(req) {
   return `${getRequestOrigin(req)}/api/wechat/pay/notify`;
 }
 
+function isAlipayConfigured() {
+  return Boolean(alipayAppId && alipayPrivateKey);
+}
+
+function getAlipayNotifyUrl(req) {
+  if (alipayNotifyUrl) {
+    return alipayNotifyUrl;
+  }
+
+  return `${getRequestOrigin(req)}/api/alipay/pay/notify`;
+}
+
+function buildRechargeReturnUrl(req, rawReturnUrl, orderId) {
+  const fallback = new URL("/recharge.html", getRequestOrigin(req));
+  const baseUrl = toAbsoluteUrl(req, rawReturnUrl) || fallback.toString();
+  const target = new URL(baseUrl);
+  target.searchParams.set("orderId", orderId);
+  target.searchParams.set("payResult", "return");
+  target.searchParams.delete("autopay");
+  target.searchParams.delete("planKey");
+  target.searchParams.delete("paymentMethod");
+  target.searchParams.delete("wechatAuth");
+  return target.toString();
+}
+
 function isWechatBrowserRequest(req) {
   return /micromessenger/i.test(String(req.headers["user-agent"] || ""));
 }
+
 
 function parseCookies(req) {
   const cookieHeader = String(req.headers.cookie || "").trim();
@@ -276,7 +337,64 @@ function buildContentSharePath(content) {
   return shareVersion ? `/content/${slug}?sharev=${shareVersion}` : `/content/${slug}`;
 }
 
-function buildContentPageMeta(req, content) {
+function buildContentPublicSharePath(content) {
+  const slug = encodeURIComponent(String(content?.slug || "").trim());
+  return slug ? `/share/${slug}` : "";
+}
+
+function buildContentShareEntryPath(content) {
+  return buildContentPublicSharePath(content);
+}
+
+function buildContentMiniProgramPath(content) {
+  const sharePage = String(siteMeta.defaultMiniProgramSharePage || "").trim();
+  const slug = String(content?.slug || "").trim();
+  if (!sharePage) {
+    return "";
+  }
+  if (!slug) {
+    return sharePage;
+  }
+
+  const separator = sharePage.includes("?") ? "&" : "?";
+  return `${sharePage}${separator}${new URLSearchParams({ slug }).toString()}`;
+}
+
+function splitMiniProgramPath(rawPath) {
+  const fullPath = String(rawPath || "").trim();
+  const [pathValue, ...queryParts] = fullPath.split("?");
+  return {
+    path: String(pathValue || "").trim(),
+    query: queryParts.join("?").trim()
+  };
+}
+
+function buildBaseEnrichedContent(content) {
+  const current = content && typeof content === "object" ? { ...content } : {};
+  const miniProgramPath =
+    String(current.miniProgramPath || "").trim() || buildContentMiniProgramPath(current);
+
+  return {
+    ...current,
+    link: buildContentSharePath(current),
+    detailLink: buildContentSharePath(current),
+    sharePublicLink: buildContentPublicSharePath(current),
+    shareEntryLink: buildContentShareEntryPath(current),
+    miniProgramName:
+      String(current.miniProgramName || "").trim() || String(siteMeta.defaultMiniProgramName || "").trim(),
+    miniProgramAppId:
+      String(current.miniProgramAppId || "").trim() || String(siteMeta.defaultMiniProgramAppId || "").trim(),
+    miniProgramOriginalId:
+      String(current.miniProgramOriginalId || "").trim() ||
+      String(siteMeta.defaultMiniProgramOriginalId || "").trim(),
+    miniProgramPath,
+    miniProgramLaunchUrl: String(current.miniProgramLaunchUrl || "").trim(),
+    miniProgramNote:
+      String(current.miniProgramNote || "").trim() || String(siteMeta.defaultMiniProgramNote || "").trim()
+  };
+}
+
+function buildContentPageMeta(req, content, { pageKind = "detail" } = {}) {
   const title = String(content?.title || "").trim() || siteMeta.siteName;
   const siteName = String(siteMeta.siteName || "知识库").trim();
   const pageTitle = title && siteName ? `${title} - ${siteName}` : title || siteName;
@@ -284,7 +402,8 @@ function buildContentPageMeta(req, content) {
     stripHtml(content?.summary) ||
     stripHtml(content?.body).slice(0, 120) ||
     `${title || siteName}，来自${siteName}`;
-  const url = toAbsoluteUrl(req, req.originalUrl || buildContentSharePath(content));
+  const targetPath = pageKind === "share" ? buildContentPublicSharePath(content) : buildContentSharePath(content);
+  const url = toAbsoluteUrl(req, targetPath || req.originalUrl || "/");
   const image = toAbsoluteUrl(req, content?.shareImageUrl || siteMeta.defaultShareImage);
 
   return {
@@ -297,8 +416,8 @@ function buildContentPageMeta(req, content) {
   };
 }
 
-function renderContentDetailHtml(req, content) {
-  const meta = buildContentPageMeta(req, content);
+function renderContentPageHtml(req, content, { template, pageKind = "detail" } = {}) {
+  const meta = buildContentPageMeta(req, content, { pageKind });
   const metaTags = [
     `<meta name="description" content="${escapeHtml(meta.description)}" />`,
     `<meta property="og:type" content="article" />`,
@@ -310,14 +429,102 @@ function renderContentDetailHtml(req, content) {
     `<meta name="twitter:card" content="summary_large_image" />`,
     `<meta name="twitter:title" content="${escapeHtml(meta.title)}" />`,
     `<meta name="twitter:description" content="${escapeHtml(meta.description)}" />`,
-    meta.image ? `<meta name="twitter:image" content="${escapeHtml(meta.image)}" />` : ""
+    meta.image ? `<meta name="twitter:image" content="${escapeHtml(meta.image)}" />` : "",
+    meta.url ? `<link rel="canonical" href="${escapeHtml(meta.url)}" />` : "",
+    pageKind === "share" ? `<meta name="robots" content="noindex,nofollow" />` : ""
   ]
     .filter(Boolean)
     .join("\n    ");
 
-  return detailHtmlTemplate
+  return template
     .replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtml(meta.pageTitle)}</title>`)
     .replace("</head>", `    ${metaTags}\n  </head>`);
+}
+
+function renderContentDetailHtml(req, content) {
+  return renderContentPageHtml(req, content, { template: detailHtmlTemplate, pageKind: "detail" });
+}
+
+function renderContentShareHtml(req, content) {
+  return renderContentPageHtml(req, content, { template: shareHtmlTemplate, pageKind: "share" });
+}
+
+function renderShareAccessDeniedHtml(content) {
+  const detailLink = buildContentSharePath(content) || "/";
+  const title = escapeHtml(String(content?.title || "").trim());
+  const hint = title
+    ? `如果你要分享《${title}》，请先进入正文页，再点击“去分享页”。`
+    : "请先进入正文页，再点击“去分享页”。";
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>请先从正文页进入</title>
+    <link rel="stylesheet" href="/styles.css?v=20260403d" />
+    <meta name="robots" content="noindex,nofollow" />
+  </head>
+  <body data-title="分享页访问受限">
+    <main class="detail-shell">
+      <section class="detail-card share-access-card">
+        <p class="eyebrow">分享页入口控制</p>
+        <h1>请先从正文页进入分享页</h1>
+        <p class="detail-meta">当前分享页只允许通过正文页跳转、微信卡片打开或后端直出访问。</p>
+        <p class="detail-body">${hint}</p>
+        <div class="chip-row" style="margin-top:20px;justify-content:flex-start">
+          <a class="chip chip--primary" href="${escapeHtml(detailLink)}">打开正文页</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>`;
+}
+
+function httpsRequestJson(apiPath, { method = "GET", headers = {}, body = null } = {}) {
+  return new Promise((resolve, reject) => {
+    const payload = body ? JSON.stringify(body) : "";
+    const request = https.request(
+      {
+        hostname: wechatApiHost,
+        path: apiPath,
+        method,
+        headers: {
+          Accept: "application/json",
+          ...(payload
+            ? {
+                "Content-Type": "application/json",
+                "Content-Length": Buffer.byteLength(payload)
+              }
+            : {}),
+          ...headers
+        }
+      },
+      (response) => {
+        let raw = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => {
+          raw += chunk;
+        });
+        response.on("end", () => {
+          try {
+            resolve(JSON.parse(raw || "{}"));
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }
+    );
+
+    request.setTimeout(8000, () => {
+      request.destroy(new Error("wechat api timeout"));
+    });
+    request.on("error", reject);
+    if (payload) {
+      request.write(payload);
+    }
+    request.end();
+  });
 }
 
 async function getWechatRedisClient() {
@@ -359,32 +566,32 @@ async function getWechatRedisClient() {
   return wechatRedisConnectPromise;
 }
 
-function getWechatCacheKey(name) {
-  return `${wechatCachePrefix}:${wechatAppId}:${name}`;
+function getWechatCacheKey(name, appId = wechatAppId) {
+  return `${wechatCachePrefix}:${String(appId || wechatAppId || "default").trim()}:${name}`;
 }
 
-async function getSharedWechatCacheValue(name) {
+async function getSharedWechatCacheValue(name, appId = wechatAppId) {
   const client = await getWechatRedisClient();
   if (!client) {
     return "";
   }
 
   try {
-    return String((await client.get(getWechatCacheKey(name))) || "").trim();
+    return String((await client.get(getWechatCacheKey(name, appId))) || "").trim();
   } catch (error) {
     console.error(`[wechat] failed to read redis key ${name}:`, error.message);
     return "";
   }
 }
 
-async function setSharedWechatCacheValue(name, value, ttlSeconds) {
+async function setSharedWechatCacheValue(name, value, ttlSeconds, appId = wechatAppId) {
   const client = await getWechatRedisClient();
   if (!client) {
     return;
   }
 
   try {
-    await client.set(getWechatCacheKey(name), value, {
+    await client.set(getWechatCacheKey(name, appId), value, {
       EX: Math.max(Number(ttlSeconds) || 0, 60)
     });
   } catch (error) {
@@ -392,14 +599,14 @@ async function setSharedWechatCacheValue(name, value, ttlSeconds) {
   }
 }
 
-async function acquireWechatLock(name, ttlSeconds = 15) {
+async function acquireWechatLock(name, ttlSeconds = 15, appId = wechatAppId) {
   const client = await getWechatRedisClient();
   if (!client) {
     return null;
   }
 
   const token = crypto.randomBytes(12).toString("hex");
-  const key = getWechatCacheKey(`lock:${name}`);
+  const key = getWechatCacheKey(`lock:${name}`, appId);
   try {
     const result = await client.set(key, token, {
       NX: true,
@@ -430,10 +637,10 @@ async function releaseWechatLock(lock) {
   }
 }
 
-async function waitForSharedWechatCacheValue(name, timeoutMs = 4000) {
+async function waitForSharedWechatCacheValue(name, timeoutMs = 4000, appId = wechatAppId) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const value = await getSharedWechatCacheValue(name);
+    const value = await getSharedWechatCacheValue(name, appId);
     if (value) {
       return value;
     }
@@ -1170,6 +1377,7 @@ function normalizeRechargeOrderRecord(order = {}) {
     gatewayMessage: String(order.gatewayMessage || "").trim(),
     gatewayTransactionId: String(order.gatewayTransactionId || "").trim(),
     wechatH5Url: String(order.wechatH5Url || "").trim(),
+    alipayWapUrl: String(order.alipayWapUrl || "").trim(),
     tradeState: String(order.tradeState || "").trim(),
     tradeStateDesc: String(order.tradeStateDesc || "").trim(),
     paidAt: String(order.paidAt || "").trim(),
@@ -1180,6 +1388,136 @@ function normalizeRechargeOrderRecord(order = {}) {
 
 function findRechargeOrderIndex(data, orderId) {
   return (data.rechargeOrders || []).findIndex((item) => String(item?.id || "").trim() === String(orderId || "").trim());
+}
+
+function buildAlipaySignContent(params = {}) {
+  return Object.keys(params)
+    .filter((key) => key !== "sign" && params[key] !== undefined && params[key] !== null && params[key] !== "")
+    .sort()
+    .map((key) => `${key}=${params[key]}`)
+    .join("&");
+}
+
+function signAlipayParams(params = {}) {
+  return crypto.sign("RSA-SHA256", Buffer.from(buildAlipaySignContent(params), "utf8"), alipayPrivateKey).toString("base64");
+}
+
+function formatAlipayTimestamp(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+function buildAlipayOpenApiParams({ method, bizContent, notifyUrl = "", returnUrl = "" }) {
+  const params = {
+    app_id: alipayAppId,
+    method,
+    format: "JSON",
+    charset: "utf-8",
+    sign_type: "RSA2",
+    timestamp: formatAlipayTimestamp(),
+    version: "1.0",
+    biz_content: typeof bizContent === "string" ? bizContent : JSON.stringify(bizContent || {})
+  };
+
+  if (notifyUrl) {
+    params.notify_url = notifyUrl;
+  }
+
+  if (returnUrl) {
+    params.return_url = returnUrl;
+  }
+
+  params.sign = signAlipayParams(params);
+  return params;
+}
+
+function buildAlipayGatewayUrl(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      query.set(key, value);
+    }
+  });
+  return `https://${alipayGatewayHost}${alipayGatewayPath}?${query.toString()}`;
+}
+
+function extractAlipayResponse(method, payload = {}) {
+  const responseKey = `${String(method || "").trim().replace(/\./g, "_")}_response`;
+  const response = payload?.[responseKey];
+  if (!response || typeof response !== "object") {
+    const error = new Error("alipay response payload invalid");
+    error.response = payload;
+    throw error;
+  }
+
+  const code = String(response.code || "").trim();
+  if (code && code !== "10000") {
+    const error = new Error(
+      String(response.sub_msg || response.msg || response.sub_code || response.code || "alipay request failed").trim()
+    );
+    error.response = payload;
+    throw error;
+  }
+
+  return response;
+}
+
+function callAlipayOpenApi({ method, bizContent }) {
+  return new Promise((resolve, reject) => {
+    const params = buildAlipayOpenApiParams({ method, bizContent });
+    const payload = new URLSearchParams(params).toString();
+    const request = https.request(
+      {
+        hostname: alipayGatewayHost,
+        method: "POST",
+        path: alipayGatewayPath,
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
+          "Content-Length": Buffer.byteLength(payload, "utf8"),
+          "User-Agent": "zhishiku-h5/1.0"
+        }
+      },
+      (response) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          let parsed = null;
+
+          try {
+            parsed = JSON.parse(text);
+          } catch (error) {
+            parsed = null;
+          }
+
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            const requestError = new Error(`alipay request failed with status ${response.statusCode}`);
+            requestError.statusCode = response.statusCode;
+            requestError.response = parsed || text;
+            reject(requestError);
+            return;
+          }
+
+          try {
+            resolve(extractAlipayResponse(method, parsed || {}));
+          } catch (error) {
+            error.statusCode = error.statusCode || 502;
+            reject(error);
+          }
+        });
+      }
+    );
+
+    request.on("error", reject);
+    request.write(payload);
+    request.end();
+  });
 }
 
 function buildWechatPayAuthorization({ method, requestPath, body = "" }) {
@@ -1339,6 +1677,34 @@ async function queryWechatTransactionByOutTradeNo(orderId) {
   });
 }
 
+function createAlipayWapPayment(req, order, returnUrl) {
+  const params = buildAlipayOpenApiParams({
+    method: "alipay.trade.wap.pay",
+    notifyUrl: getAlipayNotifyUrl(req),
+    returnUrl,
+    bizContent: {
+      out_trade_no: order.id,
+      total_amount: Number(order.amount || 0).toFixed(2),
+      subject: `${siteMeta.siteShortName || siteMeta.siteName || "知识库"} ${order.planLabel}`.trim().slice(0, 256),
+      product_code: "QUICK_WAP_WAY",
+      quit_url: returnUrl
+    }
+  });
+
+  return {
+    url: buildAlipayGatewayUrl(params)
+  };
+}
+
+async function queryAlipayTransactionByOutTradeNo(orderId) {
+  return callAlipayOpenApi({
+    method: "alipay.trade.query",
+    bizContent: {
+      out_trade_no: orderId
+    }
+  });
+}
+
 function applyRechargeOrderState(data, orderIndex, queryResult = {}) {
   const existing = normalizeRechargeOrderRecord(data.rechargeOrders[orderIndex] || {});
   const next = {
@@ -1382,6 +1748,57 @@ function applyRechargeOrderState(data, orderIndex, queryResult = {}) {
     next.status = "pending";
     next.paymentStatus = "awaiting_payment";
     next.gatewayMessage = next.tradeStateDesc || "等待用户支付";
+  }
+
+  data.rechargeOrders[orderIndex] = next;
+  return next;
+}
+
+function applyAlipayRechargeOrderState(data, orderIndex, queryResult = {}) {
+  const existing = normalizeRechargeOrderRecord(data.rechargeOrders[orderIndex] || {});
+  const tradeState = String(queryResult.trade_status || existing.tradeState || "").trim();
+  const tradeStateDesc = String(queryResult.msg || existing.tradeStateDesc || "").trim();
+  const next = {
+    ...existing,
+    tradeState,
+    tradeStateDesc,
+    gatewayTransactionId: String(queryResult.trade_no || existing.gatewayTransactionId || "").trim(),
+    updatedAt: new Date().toISOString()
+  };
+
+  if (["TRADE_SUCCESS", "TRADE_FINISHED"].includes(tradeState)) {
+    if (existing.paymentStatus !== "paid") {
+      const currentVip = normalizeVipUserRecord(next.userId, data.vipUsers[next.userId] || {});
+      const updatedVip = addVipDuration(currentVip, next.durationDays, {
+        fromRecharge: true,
+        amount: next.amount
+      });
+
+      data.vipUsers[next.userId] = updatedVip;
+      addUserNotification(data, next.userId, {
+        type: "recharge_paid",
+        title: "支付宝支付已完成",
+        message: `${next.planLabel} 已开通，VIP 时长已到账。`,
+        meta: {
+          orderId: next.id,
+          durationDays: next.durationDays,
+          vipExpiresAt: updatedVip.vipExpiresAt
+        }
+      });
+    }
+
+    next.status = "paid";
+    next.paymentStatus = "paid";
+    next.gatewayMessage = "支付宝支付成功";
+    next.paidAt = String(queryResult.send_pay_date || existing.paidAt || next.updatedAt).trim();
+  } else if (tradeState === "TRADE_CLOSED") {
+    next.status = "closed";
+    next.paymentStatus = "closed";
+    next.gatewayMessage = "订单已关闭";
+  } else if (tradeState) {
+    next.status = "pending";
+    next.paymentStatus = "awaiting_payment";
+    next.gatewayMessage = "等待用户完成支付宝支付";
   }
 
   data.rechargeOrders[orderIndex] = next;
@@ -2331,6 +2748,128 @@ async function getWechatJsapiTicket() {
   }
 }
 
+function isMiniProgramUrlLinkConfigured() {
+  return Boolean(miniProgramAppId && miniProgramAppSecret);
+}
+
+async function getMiniProgramAccessToken() {
+  const now = Date.now();
+  const sharedAccessToken = await getSharedWechatCacheValue("mini_access_token", miniProgramAppId);
+  if (sharedAccessToken) {
+    miniProgramTokenCache.accessToken = sharedAccessToken;
+    miniProgramTokenCache.accessTokenExpiresAt = now + 60 * 1000;
+    return sharedAccessToken;
+  }
+
+  if (miniProgramTokenCache.accessToken && miniProgramTokenCache.accessTokenExpiresAt > now) {
+    return miniProgramTokenCache.accessToken;
+  }
+
+  const lock = await acquireWechatLock("mini_access_token", 15, miniProgramAppId);
+  if (!lock) {
+    const waitedToken = await waitForSharedWechatCacheValue("mini_access_token", 4000, miniProgramAppId);
+    if (waitedToken) {
+      miniProgramTokenCache.accessToken = waitedToken;
+      miniProgramTokenCache.accessTokenExpiresAt = now + 60 * 1000;
+      return waitedToken;
+    }
+  }
+
+  try {
+    const result = await httpsGetJson(
+      `/cgi-bin/token?grant_type=client_credential&appid=${encodeURIComponent(
+        miniProgramAppId
+      )}&secret=${encodeURIComponent(miniProgramAppSecret)}`
+    );
+
+    if (!result.access_token) {
+      throw new Error(result.errmsg || "failed to fetch mini program access_token");
+    }
+
+    const ttlSeconds = Math.max(Number(result.expires_in) - 300, 60);
+    miniProgramTokenCache.accessToken = result.access_token;
+    miniProgramTokenCache.accessTokenExpiresAt = now + ttlSeconds * 1000;
+    await setSharedWechatCacheValue("mini_access_token", result.access_token, ttlSeconds, miniProgramAppId);
+    return miniProgramTokenCache.accessToken;
+  } finally {
+    await releaseWechatLock(lock);
+  }
+}
+
+async function generateMiniProgramUrlLink(content) {
+  if (!isMiniProgramUrlLinkConfigured()) {
+    return "";
+  }
+
+  const { path: pagePath, query } = splitMiniProgramPath(buildContentMiniProgramPath(content));
+  if (!pagePath) {
+    return "";
+  }
+
+  const accessToken = await getMiniProgramAccessToken();
+  const result = await httpsRequestJson(
+    `/wxa/generate_urllink?access_token=${encodeURIComponent(accessToken)}`,
+    {
+      method: "POST",
+      body: {
+        path: pagePath,
+        query,
+        env_version: miniProgramEnvVersion,
+        expire_type: 1,
+        expire_interval: miniProgramUrlLinkExpireDays
+      }
+    }
+  );
+
+  if (!result.url_link) {
+    throw new Error(result.errmsg || "failed to generate mini program url link");
+  }
+
+  return String(result.url_link || "").trim();
+}
+
+async function enrichContentItems(data, items) {
+  const list = Array.isArray(items) ? items : [];
+  let mutated = false;
+  const enriched = [];
+
+  for (const item of list) {
+    if (!item || typeof item !== "object") {
+      enriched.push(buildBaseEnrichedContent(item));
+      continue;
+    }
+
+    const nextPath = buildContentMiniProgramPath(item);
+    if (!String(item.miniProgramPath || "").trim() && nextPath) {
+      item.miniProgramPath = nextPath;
+      mutated = true;
+    }
+
+    if (!String(item.miniProgramLaunchUrl || "").trim() && isMiniProgramUrlLinkConfigured() && nextPath) {
+      try {
+        const launchUrl = await generateMiniProgramUrlLink(item);
+        if (launchUrl) {
+          item.miniProgramLaunchUrl = launchUrl;
+          mutated = true;
+        }
+      } catch (error) {
+        console.error(
+          `[mini-program] failed to generate url link for ${String(item.slug || item.id || "").trim()}:`,
+          error.message
+        );
+      }
+    }
+
+    enriched.push(buildBaseEnrichedContent(item));
+  }
+
+  if (mutated && data) {
+    writeData(data);
+  }
+
+  return enriched;
+}
+
 async function buildWechatSignature(rawUrl) {
   const inputUrl = String(rawUrl || "").split("#")[0].trim();
   if (!inputUrl) {
@@ -2424,7 +2963,7 @@ app.get("/api/config", (req, res) => {
   });
 });
 
-app.get("/api/content", (req, res) => {
+app.get("/api/content", async (req, res) => {
   const data = readData();
   const page = String(req.query.page || "").trim();
   const groupKey = String(req.query.groupKey || "").trim();
@@ -2441,7 +2980,8 @@ app.get("/api/content", (req, res) => {
     contents = contents.filter((item) => item.subKey === subKey);
   }
 
-  res.json({ contents });
+  const enrichedContents = await enrichContentItems(data, contents);
+  res.json({ contents: enrichedContents });
 });
 
 app.get("/api/notes", (req, res) => {
@@ -2471,7 +3011,7 @@ app.get("/api/notes", (req, res) => {
   res.json({ notes });
 });
 
-app.get("/api/content/:slug", (req, res) => {
+app.get("/api/content/:slug", async (req, res) => {
   const data = readData();
   const content = data.contents.find((item) => item.slug === req.params.slug);
 
@@ -2480,11 +3020,11 @@ app.get("/api/content/:slug", (req, res) => {
   }
 
   const meta = resolveSectionMeta(data, content.page, content.groupKey, content.subKey) || {};
+  const [enrichedContent] = await enrichContentItems(data, [content]);
   res.json({
     content: {
-      ...content,
+      ...enrichedContent,
       ...meta,
-      link: buildContentSharePath(content)
     }
   });
 });
@@ -2933,6 +3473,7 @@ app.post("/api/recharge/orders", async (req, res) => {
     gatewayMessage: `${payload.paymentMethod === "wechat" ? "微信支付" : "支付宝支付"}接口待接入`,
     gatewayTransactionId: "",
     wechatH5Url: "",
+    alipayWapUrl: "",
     tradeState: "",
     tradeStateDesc: "",
     paidAt: "",
@@ -2994,6 +3535,33 @@ app.post("/api/recharge/orders", async (req, res) => {
         detail: error.response || null
       });
     }
+  } else if (payload.paymentMethod === "alipay") {
+    if (!isAlipayConfigured()) {
+      return res.status(503).json({
+        message: "alipay not configured",
+        missing: [
+          ["ALIPAY_APP_ID", alipayAppId],
+          ["ALIPAY_PRIVATE_KEY / ALIPAY_PRIVATE_KEY_PATH", alipayPrivateKey]
+        ]
+          .filter((item) => !item[1])
+          .map((item) => item[0])
+      });
+    }
+
+    try {
+      const returnUrl = buildRechargeReturnUrl(req, payload.returnUrl, order.id);
+      const gatewayResult = createAlipayWapPayment(req, order, returnUrl);
+      order.paymentStatus = "awaiting_payment";
+      order.gatewayMessage = "支付宝下单成功，等待用户完成支付";
+      order.alipayWapUrl = String(gatewayResult.url || "").trim();
+      order.tradeState = "WAIT_BUYER_PAY";
+      order.tradeStateDesc = "待支付";
+    } catch (error) {
+      return res.status(error.statusCode || 502).json({
+        message: error.message || "failed to create alipay order",
+        detail: error.response || null
+      });
+    }
   }
 
   data.rechargeOrders.unshift(order);
@@ -3002,7 +3570,7 @@ app.post("/api/recharge/orders", async (req, res) => {
   res.status(201).json({
     message: "order created",
     order: normalizeRechargeOrderRecord(order),
-    integrationReady: payload.paymentMethod === "wechat",
+    integrationReady: payload.paymentMethod === "wechat" || payload.paymentMethod === "alipay",
     payment:
       payload.paymentMethod === "wechat"
         ? order.paymentChannel === "jsapi"
@@ -3014,13 +3582,20 @@ app.post("/api/recharge/orders", async (req, res) => {
               mode: "redirect",
               h5Url: order.wechatH5Url
             }
+        : payload.paymentMethod === "alipay"
+          ? {
+              mode: "redirect",
+              h5Url: order.alipayWapUrl
+            }
         : null,
     nextStep:
       payload.paymentMethod === "wechat"
         ? order.paymentChannel === "jsapi"
           ? "请在微信内完成支付，支付回调后页面会自动查询结果。"
           : "请跳转微信支付中间页完成付款，回跳后页面会自动查询结果。"
-        : "支付接口待接入，当前已预留订单与网关字段。"
+        : payload.paymentMethod === "alipay"
+          ? "请跳转支付宝收银台完成付款，回跳后页面会自动查询结果。"
+          : "支付接口待接入，当前已预留订单与网关字段。"
   });
 });
 
@@ -3048,6 +3623,17 @@ app.get("/api/recharge/orders/:orderId/status", async (req, res) => {
         order
       });
     }
+  } else if (order.paymentMethod === "alipay" && isAlipayConfigured() && order.paymentStatus !== "paid") {
+    try {
+      const queryResult = await queryAlipayTransactionByOutTradeNo(order.id);
+      order = applyAlipayRechargeOrderState(data, orderIndex, queryResult);
+      writeData(data);
+    } catch (error) {
+      return res.status(error.statusCode || 502).json({
+        message: error.message || "failed to query alipay order",
+        order
+      });
+    }
   }
 
   res.json({
@@ -3061,6 +3647,10 @@ app.post("/api/wechat/pay/notify", (req, res) => {
     code: "SUCCESS",
     message: "OK"
   });
+});
+
+app.all("/api/alipay/pay/notify", (req, res) => {
+  res.type("text/plain").send("success");
 });
 
 app.delete("/api/analytics", (req, res) => {
@@ -3126,7 +3716,7 @@ app.post("/api/uploads/image", async (req, res) => {
   }
 });
 
-app.post("/api/content", (req, res) => {
+app.post("/api/content", async (req, res) => {
   const data = readData();
   const payload = sanitizeContentPayload(req.body || {});
 
@@ -3148,13 +3738,13 @@ app.post("/api/content", (req, res) => {
 
   data.contents.unshift(content);
   writeData(data);
+  const [enrichedContent] = await enrichContentItems(data, [content]);
 
   res.status(201).json({
     message: "created",
     content: {
-      ...content,
+      ...enrichedContent,
       ...meta,
-      link: buildContentSharePath(content)
     }
   });
 });
@@ -3184,7 +3774,7 @@ app.post("/api/notes", (req, res) => {
   });
 });
 
-app.put("/api/content/:id", (req, res) => {
+app.put("/api/content/:id", async (req, res) => {
   const contentId = String(req.params.id || "").trim();
   const payload = sanitizeContentPayload(req.body || {});
   const data = readData();
@@ -3219,13 +3809,13 @@ app.put("/api/content/:id", (req, res) => {
 
   data.contents[index] = updated;
   writeData(data);
+  const [enrichedContent] = await enrichContentItems(data, [updated]);
 
   res.json({
     message: "updated",
     content: {
-      ...updated,
+      ...enrichedContent,
       ...meta,
-      link: buildContentSharePath(updated)
     }
   });
 });
@@ -3466,7 +4056,7 @@ app.post("/api/analytics/track", (req, res) => {
   res.status(201).json({ message: "tracked", event: result.event });
 });
 
-app.get("/content/:slug", (req, res) => {
+app.get("/content/:slug", async (req, res) => {
   const data = readData();
   const content = data.contents.find((item) => item.slug === req.params.slug);
 
@@ -3474,7 +4064,24 @@ app.get("/content/:slug", (req, res) => {
     return res.status(404).sendFile(path.join(publicDir, "detail.html"));
   }
 
-  res.type("html").send(renderContentDetailHtml(req, content));
+  const [enrichedContent] = await enrichContentItems(data, [content]);
+  res.type("html").send(renderContentDetailHtml(req, enrichedContent));
+});
+
+app.get("/share/:slug", async (req, res) => {
+  const data = readData();
+  const content = data.contents.find((item) => item.slug === req.params.slug);
+
+  if (!content) {
+    return res.status(404).sendFile(path.join(publicDir, "share.html"));
+  }
+
+  const [enrichedContent] = await enrichContentItems(data, [content]);
+  res.type("html").send(renderContentShareHtml(req, enrichedContent));
+});
+
+app.get("/section/:page/:groupKey", (req, res) => {
+  res.sendFile(path.join(publicDir, "group.html"));
 });
 
 app.get("/section/:page/:groupKey/:subKey", (req, res) => {

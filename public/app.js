@@ -149,6 +149,10 @@ function getSubsectionLink(page, groupKey, subKey) {
   return `/section/${encodeURIComponent(page)}/${encodeURIComponent(groupKey)}/${encodeURIComponent(subKey)}`;
 }
 
+function getGroupLink(page, groupKey) {
+  return `/section/${encodeURIComponent(page)}/${encodeURIComponent(groupKey)}`;
+}
+
 function scrollToHashTarget() {
   const rawHash = String(window.location.hash || "").trim();
   if (!rawHash) {
@@ -211,7 +215,10 @@ async function loadPage() {
 
       return `
         <section class="section-block" id="group-${group.key}">
-          <h2>${group.label}</h2>
+          <div class="subsection-page__head">
+            <h2>${group.label}</h2>
+            <a class="chip" href="${getGroupLink(page, group.key)}">进入板块</a>
+          </div>
           <div class="subsection-grid">
             ${subsectionHtml}
           </div>

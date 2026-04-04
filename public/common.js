@@ -33,6 +33,14 @@
       .trim();
   }
 
+  function isTrustedWechatExternalShareHost(hostname) {
+    return (
+      /(^|\.)wxaurl\.cn$/.test(hostname) ||
+      /(^|\.)w\.url\.cn$/.test(hostname) ||
+      /(^|\.)mp\.weixin\.qq\.com$/.test(hostname)
+    );
+  }
+
   function createUserId() {
     return `user-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
@@ -511,7 +519,7 @@
     }
 
     const hostname = normalizeHostname(new URL(absoluteUrl).hostname);
-    if (!wechatShareAllowedHosts.includes(hostname)) {
+    if (!wechatShareAllowedHosts.includes(hostname) && !isTrustedWechatExternalShareHost(hostname)) {
       throw new Error("当前分享链接域名未加入微信 JS 接口安全域名，请联系管理员配置。");
     }
 

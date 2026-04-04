@@ -15,6 +15,7 @@
   </view>
 
   <view wx:if="{{loading}}" class="status status--info">Loading H5 content data...</view>
+  <view wx:if="{{autoOpening && !error}}" class="status status--info">Opening the article...</view>
   <view wx:if="{{error}}" class="status status--warn">{{error}}</view>
 
   <view class="info-list">

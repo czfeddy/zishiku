@@ -3,8 +3,8 @@ const { buildWebviewUrl, getContentBySlug, normalizeContent } = require("../../u
 
 const fallbackContent = normalizeContent({
   slug: config.defaultContentSlug,
-  title: "银行房产抵押办理要点",
-  summary: "覆盖准入条件、资料清单和放款流程，点击查看完整内容。",
+  title: "Bank Mortgage Guide",
+  summary: "Open the article directly from the mini program share entry.",
   shareImageUrl: `${config.h5Origin}/uploads/share-cover.jpg`,
   link: `${config.h5Origin}/content/${config.defaultContentSlug}`
 });
@@ -14,7 +14,8 @@ Page({
     loading: true,
     error: "",
     canOpenWebview: false,
-    content: fallbackContent
+    content: fallbackContent,
+    autoOpening: false
   },
 
   onLoad(query) {
@@ -25,6 +26,9 @@ Page({
     }
 
     const slug = String(query.slug || config.defaultContentSlug).trim();
+    const autoOpen = String(query.autoOpen || "1").trim() !== "0";
+    this.autoOpenOnReady = autoOpen;
+    this.hasAutoOpened = false;
     this.loadContent(slug);
   },
 
@@ -32,7 +36,7 @@ Page({
     const { content } = this.data;
     return {
       title: content.title,
-      path: `/pages/share/index?slug=${encodeURIComponent(content.slug)}`,
+      path: `/pages/share/index?slug=${encodeURIComponent(content.slug)}&autoOpen=1`,
       imageUrl: content.shareImageUrl
     };
   },
@@ -41,7 +45,7 @@ Page({
     const { content } = this.data;
     return {
       title: content.title,
-      query: `slug=${encodeURIComponent(content.slug)}`,
+      query: `slug=${encodeURIComponent(content.slug)}&autoOpen=1`,
       imageUrl: content.shareImageUrl
     };
   },
@@ -49,7 +53,8 @@ Page({
   async loadContent(slug) {
     this.setData({
       loading: true,
-      error: ""
+      error: "",
+      autoOpening: false
     });
 
     try {
@@ -59,10 +64,11 @@ Page({
         canOpenWebview: true,
         content
       });
+      this.tryAutoOpenWebview();
     } catch (error) {
       this.setData({
         loading: false,
-        error: error?.errMsg || error?.message || "内容加载失败，已切换为本地示例数据。",
+        error: error?.errMsg || error?.message || "Content load failed.",
         canOpenWebview: false,
         content: fallbackContent
       });
@@ -74,9 +80,35 @@ Page({
   },
 
   handleOpenWebview() {
+    this.openWebview();
+  },
+
+  tryAutoOpenWebview() {
+    if (!this.autoOpenOnReady || this.hasAutoOpened || !this.data.canOpenWebview) {
+      return;
+    }
+
+    this.hasAutoOpened = true;
+    this.openWebview();
+  },
+
+  openWebview() {
     const targetUrl = buildWebviewUrl(this.data.content);
-    wx.navigateTo({
-      url: `/pages/webview/index?src=${encodeURIComponent(targetUrl)}`
+    this.setData({
+      autoOpening: true
+    });
+
+    wx.redirectTo({
+      url: `/pages/webview/index?src=${encodeURIComponent(targetUrl)}`,
+      fail: () => {
+        this.hasAutoOpened = false;
+        this.setData({
+          autoOpening: false
+        });
+        wx.navigateTo({
+          url: `/pages/webview/index?src=${encodeURIComponent(targetUrl)}`
+        });
+      }
     });
   },
 
