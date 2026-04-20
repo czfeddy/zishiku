@@ -1,3 +1,9 @@
 {
-  "rules": []
+  "desc": "知识库小程序测试工程 sitemap",
+  "rules": [
+    {
+      "action": "allow",
+      "page": "*"
+    }
+  ]
 }

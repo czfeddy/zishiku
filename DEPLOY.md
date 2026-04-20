@@ -25,6 +25,21 @@ WECHAT_SHARE_ALLOWED_HOSTS=zsk.xinyongdai123.com
 DEFAULT_SHARE_IMAGE=https://zsk.xinyongdai123.com/uploads/share-cover.jpg
 ```
 
+后台管理员登录相关环境变量也建议一起配置：
+
+```env
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=请替换成强密码
+ADMIN_TRUSTED_IPS=你的常用公网IP
+ADMIN_SESSION_TTL_HOURS=12
+```
+
+说明：
+- `ADMIN_USERNAME` / `ADMIN_PASSWORD` 用于后台管理页面登录
+- `ADMIN_TRUSTED_IPS` 支持写一个或多个 IP，使用逗号或空格分隔
+- 命中 `ADMIN_TRUSTED_IPS` 的访问请求可直接进入后台，无需再次登录
+- 如果服务器前面还有反向代理，请确认应用层拿到的是真实客户端公网 IP
+
 如果你有多个子域名共用同一个公众号 AppID，请把所有实际访问域名都写进 `WECHAT_ALLOWED_HOSTS`，例如：
 
 ```env

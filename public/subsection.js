@@ -34,8 +34,6 @@ function getPageLink(page) {
       return "/recharge.html";
     case "achievements":
       return "/achievements.html";
-    case "notes":
-      return "/notes.html";
     case "home":
     default:
       return "/";
@@ -64,18 +62,18 @@ function renderBreadcrumb(meta) {
   const subsectionLink = getSubsectionLink(meta?.page, meta?.groupKey, meta?.subKey);
 
   return `
-    <nav class="breadcrumb" aria-label="面包屑导航">
+    <nav class="breadcrumb" aria-label="闂傚倸鍊搁崐鎼佹偋閸曨垰鍨傞柛锔诲幐閸嬫捇宕归顐ゅ姺婵炲濯寸粻鎾荤嵁鐎ｎ亖鏀介柟閭﹀墯椤旀捇姊?>
       <a class="breadcrumb__link" href="${escapeHtml(pageLink)}" data-breadcrumb-link="${escapeHtml(pageLink)}">${escapeHtml(
-        meta?.pageLabel || "首页"
+        meta?.pageLabel || "Home"
       )}</a>
       <span class="breadcrumb__sep">/</span>
       <a class="breadcrumb__link" href="${escapeHtml(groupLink)}" data-breadcrumb-link="${escapeHtml(groupLink)}">${escapeHtml(
-        meta?.groupLabel || "版块"
+        meta?.groupLabel || "Section"
       )}</a>
       <span class="breadcrumb__sep">/</span>
       <a class="breadcrumb__link" href="${escapeHtml(subsectionLink)}" data-breadcrumb-link="${escapeHtml(
         subsectionLink
-      )}">${escapeHtml(meta?.subLabel || "子版块")}</a>
+      )}">${escapeHtml(meta?.subLabel || "Subsection")}</a>
     </nav>
   `;
 }
@@ -94,24 +92,24 @@ function isToolItem(item) {
 
 function getActionText(item) {
   if (isMiniProgramItem(item)) {
-    return item.miniProgramLaunchUrl || item.externalUrl ? "打开小程序" : "查看打开方式";
+    return item.miniProgramLaunchUrl || item.externalUrl ? "Open mini program" : "View open method";
   }
   if (isWebToolItem(item)) {
-    return item.externalUrl ? "立即进入" : "查看详情";
+    return item.externalUrl ? "Open now" : "View details";
   }
-  return "查看详情";
+  return "View details";
 }
 
 function getActionHint(item) {
   if (isMiniProgramItem(item)) {
     return item.miniProgramLaunchUrl || item.externalUrl
-      ? "支持直接拉起微信小程序"
-      : "可复制名称与路径手动打开";
+      ? "Supports direct mini program launch"
+      : "Copy the name or path and open it manually";
   }
   if (isWebToolItem(item)) {
-    return item.externalUrl ? "点击后直接跳转工具页" : "点击查看工具说明";
+    return item.externalUrl ? "Open the web tool" : "View tool details";
   }
-  return "点击进入文章详情页并自动生成个性化名片";
+  return "Open the article detail page";
 }
 
 function ensureToolDialog() {
@@ -127,17 +125,17 @@ function ensureToolDialog() {
     <div class="tool-dialog__body">
       <div class="tool-dialog__head">
         <div>
-          <p class="eyebrow">微信小程序</p>
-          <h3 id="tool-dialog-title">打开方式</h3>
+          <p class="eyebrow">闂佽娴烽弫濠氬磻婵犲洤绐楅柡鍥╁枔閳瑰秴鈹戦悩鎻掝仹闁绘帒锕悡顐﹀炊閵婏妇锛曢梺鍝勮閸婃繈鐛?/p>
+          <h3 id="tool-dialog-title">闂傚倷鑳堕幊鎾绘倶濮樿泛绠伴柛婵勫劜椤洟鏌熸潏鍓х暠婵☆偅锕㈤弻锝夋偄缁嬫妫嗙紒缁㈠幐閸?/h3>
         </div>
-        <button type="button" class="secondary-btn" data-close-tool-dialog="true">关闭</button>
+        <button type="button" class="secondary-btn" data-close-tool-dialog="true">闂傚倷鑳堕…鍫㈡崲閹寸偟绠惧┑鐘蹭迹?/button>
       </div>
       <p id="tool-dialog-description" class="tool-dialog__description"></p>
       <div id="tool-dialog-meta" class="tool-dialog__meta"></div>
       <div class="chip-row tool-dialog__actions">
-        <button type="button" class="primary-btn" data-copy-tool-name="true">复制名称</button>
-        <button type="button" class="secondary-btn" data-copy-tool-path="true">复制路径</button>
-        <button type="button" class="secondary-btn" data-open-wechat="true">打开微信</button>
+        <button type="button" class="primary-btn" data-copy-tool-name="true">婵犵數濮伴崹鐓庘枖濞戞氨鐭撻柟缁㈠枛閺勩儲淇婇妶鍛櫣閻熸瑱濡囬埀顒€绠嶉崕鍗炩枖?/button>
+        <button type="button" class="secondary-btn" data-copy-tool-path="true">婵犵數濮伴崹鐓庘枖濞戞氨鐭撻柟缁㈠枛閺勩儲淇婇妶鍛殲鐎规洖顦伴妵鍕冀閵婏妇娈ょ紓?/button>
+        <button type="button" class="secondary-btn" data-open-wechat="true">闂傚倷鑳堕幊鎾绘倶濮樿泛绠伴柛婵勫劜椤洟鏌熺€涙绠ラ柛銈嗩殕閵囧嫰寮崶璺烘暯缂?/button>
       </div>
     </div>
   `;
@@ -155,7 +153,7 @@ function ensureToolDialog() {
 async function copyText(text, successMessage) {
   const value = String(text || "").trim();
   if (!value) {
-    window.alert("没有可复制的内容。");
+    window.alert("Nothing to copy.");
     return;
   }
 
@@ -179,7 +177,7 @@ async function copyText(text, successMessage) {
       window.alert(successMessage);
     }
   } catch (error) {
-    window.alert(`复制失败，请手动复制：${value}`);
+    window.alert(`Copy failed. Please copy manually: ${value}`);
   }
 }
 
@@ -188,20 +186,20 @@ function showMiniProgramFallback(item) {
   dialog.dataset.name = item.miniProgramName || item.title || "";
   dialog.dataset.path = item.miniProgramPath || "";
 
-  dialog.querySelector("#tool-dialog-title").textContent = item.miniProgramName || item.title || "微信小程序";
+  dialog.querySelector("#tool-dialog-title").textContent = item.miniProgramName || item.title || "Mini Program";
   dialog.querySelector("#tool-dialog-description").textContent =
-    item.miniProgramNote || "当前环境无法直接拉起小程序，可复制名称到微信搜索，或复制路径交给运营同事排查。";
+    item.miniProgramNote || "This environment cannot open the mini program directly. Copy the name or path and open it in WeChat.";
 
   const metaRows = [];
   if (item.miniProgramAppId) {
-    metaRows.push(`<p><strong>AppID：</strong>${escapeHtml(item.miniProgramAppId)}</p>`);
+    metaRows.push(`<p><strong>AppID:</strong> ${escapeHtml(item.miniProgramAppId)}</p>`);
   }
   if (item.miniProgramPath) {
-    metaRows.push(`<p><strong>页面路径：</strong>${escapeHtml(item.miniProgramPath)}</p>`);
+    metaRows.push(`<p><strong>Path:</strong> ${escapeHtml(item.miniProgramPath)}</p>`);
   }
   if (item.externalUrl) {
     metaRows.push(
-      `<p><strong>备用链接：</strong><a href="${escapeHtml(item.externalUrl)}" target="_blank" rel="noreferrer">打开链接</a></p>`
+      `<p><strong>Backup:</strong> <a href="${escapeHtml(item.externalUrl)}" target="_blank" rel="noreferrer">Open link</a></p>`
     );
   }
   dialog.querySelector("#tool-dialog-meta").innerHTML = metaRows.join("");
@@ -357,8 +355,8 @@ async function loadSubsectionPage() {
   if (!page || !groupKey || !subKey) {
     root.innerHTML = `
       <section class="detail-card">
-        <h1>板块参数不完整</h1>
-        <p class="detail-meta">请从首页重新进入对应板块。</p>
+        <h1>闂傚倷绀侀幖顐λ囬鐐村€舵繝闈涙－閻掍粙鏌ㄩ悢鍝勑㈤柣顓燁殜閺屾稓浠﹂崜褉濮囧┑鐐茬墣濞夋盯鍩ユ径鎰鐎规洖娉﹂姀銈嗙厽闁挎繂楠告晶瀵糕偓?/h1>
+        <p class="detail-meta">闂備浇宕垫慨鏉懨洪埡浣碘偓鎺楀捶椤撶偛鐏婇梺缁橆焽椤掕尙妲愰弮鍫熺厸鐎广儱楠搁獮鎴︽煃瑜滈崜娆撍囬悽绋胯摕閻忕偟鐡旈崥瀣煕閳╁喚鐒介柛妯诲姍閺屸剝寰勯崱妯荤彆缂備礁顑嗛崹鍨暦閿濆骞㈡繛鍡楄嫰娴滈箖鏌ｉ姀鐘典粵闁搞倐鍋撶紓鍌欓檷閸斿秹鎮￠垾鎰佸殨闁割偅娲栭崹鍌涖亜閺冨洦顥夊ù鐘虫尦濮?/p>
       </section>
     `;
     return;
@@ -379,8 +377,8 @@ async function loadSubsectionPage() {
   if (!pageConfig || !groupConfig || !subConfig) {
     root.innerHTML = `
       <section class="detail-card">
-        <h1>板块不存在</h1>
-        <p class="detail-meta">请检查入口链接是否正确。</p>
+        <h1>闂傚倷绀侀幖顐λ囬鐐村€舵繝闈涙－閻掍粙鏌嶉埡浣告殶闁崇粯姊婚埀顒€绠嶉崕閬嶅箠閹版澘绠洪柣妯肩帛閻?/h1>
+        <p class="detail-meta">闂備浇宕垫慨鏉懨洪銏犵哗闂侇剙鍗曟径鎰窛闁哄鍨奸幗鏇㈡⒑闂堟侗妲堕柛搴″船椤曪綁骞庨懞銉у幈濠电偛妫欓悷褏绮旈鈧弻鐔兼寠婢跺牆浠Δ鐘靛仦鐢剝淇婇悜鑺ユ櫆闁告瑯鍋撶粻鎾诲蓟濞戞﹩娼╁Δ锝呭暞椤庡秴顪冮妶鍡楃瑲缂侇喖楠搁埥澶愭偨閸撳弶鏅╅柣鐐寸▓閳ь剙鍘栨竟?/p>
       </section>
     `;
     return;
@@ -495,8 +493,8 @@ document.addEventListener("keydown", (event) => {
 loadSubsectionPage().catch(() => {
   document.getElementById("subsection-app").innerHTML = `
     <section class="detail-card">
-      <h1>加载失败</h1>
-      <p class="detail-meta">板块内容加载失败，请稍后再试。</p>
+      <h1>闂傚倷绀侀幉鈥愁潖缂佹ɑ鍙忛柟顖ｇ亹瑜版帒鐐婇柕濞垮劤缁愮偤鏌℃径濠勫⒈闁稿顦抽·?/h1>
+      <p class="detail-meta">闂傚倷绀侀幖顐λ囬鐐村€舵繝闈涙－閻掍粙鏌ㄩ悢鍝勑㈢紒鈧崘顔界厱婵炴垵宕楣冩煕閻旈攱鍠橀柡灞剧洴瀵噣宕掑В娆惧墯缁绘盯寮堕幋鐐差槱閻庡灚婢樼€氼厼顭囪箛娑辨晝闁靛鍔栧ú鐔煎蓟閵娿儮妲堟俊顖濆亹閸旑喖顪冮妶鍡樺闁告挻绋撻崚鎺戔枎韫囷絽鎮戦梺鍛婁緱閸犳牠鍩€椤掑倹鏆柡灞剧洴楠炲洭顢楅崒鍌樺劦閺岋綁鏁傜拠鑼桓婵?/p>
     </section>
   `;
 });

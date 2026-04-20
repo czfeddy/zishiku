@@ -31,6 +31,21 @@ const vipMessage = document.getElementById("vip-message");
 const vipOverview = document.getElementById("vip-overview");
 const vipUserList = document.getElementById("vip-user-list");
 const refreshVipUsersBtn = document.getElementById("refresh-vip-users");
+const adminAuthPanel = document.getElementById("admin-auth-panel");
+const adminAppShell = document.getElementById("admin-app-shell");
+const adminLoginForm = document.getElementById("admin-login-form");
+const adminLoginMessage = document.getElementById("admin-login-message");
+const adminAccessMessage = document.getElementById("admin-access-message");
+const adminLogoutBtn = document.getElementById("admin-logout-btn");
+const adminSelfPasswordForm = document.getElementById("admin-self-password-form");
+const adminSelfUsernameInput = document.getElementById("admin-self-username");
+const adminPasswordForm = document.getElementById("admin-password-form");
+const adminSelfPasswordMessage = document.getElementById("admin-self-password-message");
+const adminPasswordUserIdInput = document.getElementById("admin-password-user-id");
+const adminPasswordRecoveryPhoneInput = document.getElementById("admin-password-recovery-phone");
+const accountArchiveMessage = document.getElementById("account-archive-message");
+const accountArchiveList = document.getElementById("account-archive-list");
+const refreshAccountArchivesBtn = document.getElementById("refresh-account-archives");
 const growthAdminMessage = document.getElementById("growth-admin-message");
 const growthOverview = document.getElementById("growth-overview");
 const growthCustomerList = document.getElementById("growth-customer-list");
@@ -50,6 +65,14 @@ const refreshAnalyticsBtn = document.getElementById("refresh-analytics");
 const clearAnalyticsBtn = document.getElementById("clear-analytics");
 const adminViewPanels = Array.from(document.querySelectorAll("[data-admin-panel]"));
 const adminViewLinks = Array.from(document.querySelectorAll("[data-admin-view-link]"));
+const momentsForm = document.getElementById("moments-form");
+const momentsTitleInput = document.getElementById("moments-title");
+const momentsCopyInput = document.getElementById("moments-copy");
+const momentsImagesInput = document.getElementById("moments-images");
+const clearMomentsImagesBtn = document.getElementById("clear-moments-images");
+const momentsImageList = document.getElementById("moments-image-list");
+const momentsMessage = document.getElementById("moments-message");
+const momentsSubmitBtn = document.getElementById("moments-submit-btn");
 
 let sections = {};
 let contents = [];
@@ -57,6 +80,7 @@ let editingId = "";
 let notes = [];
 let noteEditingId = "";
 let vipUsers = [];
+let accountArchives = [];
 let growthCustomers = [];
 let selectedGrowthCustomerId = "";
 let analyticsData = null;
@@ -64,6 +88,9 @@ let shareImageUploading = false;
 let selectedContentCategory = "loans";
 let selectedContentSubsection = "";
 let selectedContentId = "";
+let adminAccessState = null;
+let adminDataLoaded = false;
+let momentsDraftImages = [];
 
 const CONTENT_TYPE_LABELS = {
   article: "普通文章",
@@ -72,20 +99,20 @@ const CONTENT_TYPE_LABELS = {
 };
 
 const ADMIN_CONTENT_SECTIONS = {
-  loans: {
-    label: "贷款",
-    page: "home",
-    groupKey: "loan-categories",
-    defaultSubKey: "bank-house-mortgage"
-  },
   articles: {
-    label: "文章",
+    label: "朋友圈图文",
     page: "home",
     groupKey: "article-center",
     defaultSubKey: "featured-articles"
   },
+  loans: {
+    label: "文章获客",
+    page: "home",
+    groupKey: "loan-categories",
+    defaultSubKey: "bank-house-mortgage"
+  },
   tools: {
-    label: "工具链接",
+    label: "精选工具",
     page: "home",
     groupKey: "tools-links",
     defaultSubKey: "featured-tools"
@@ -93,10 +120,88 @@ const ADMIN_CONTENT_SECTIONS = {
 };
 
 const DEFAULT_ADMIN_VIEW = "content-create";
+let currentAdminView = DEFAULT_ADMIN_VIEW;
 
 function setMessage(text, isError = false) {
   message.textContent = text;
   message.style.color = isError ? "#b42318" : "#7c2d12";
+}
+
+function setAdminLoginMessage(text, isError = false) {
+  if (!adminLoginMessage) {
+    return;
+  }
+  adminLoginMessage.textContent = text;
+  adminLoginMessage.style.color = isError ? "#b42318" : "#7c2d12";
+}
+
+function setAdminSelfPasswordMessage(text, isError = false) {
+  if (!adminSelfPasswordMessage) {
+    return;
+  }
+  adminSelfPasswordMessage.textContent = text;
+  adminSelfPasswordMessage.style.color = isError ? "#b42318" : "#7c2d12";
+}
+
+function setMomentsMessage(text, isError = false) {
+  if (!momentsMessage) {
+    return;
+  }
+  momentsMessage.textContent = text;
+  momentsMessage.style.color = isError ? "#b42318" : "#7c2d12";
+}
+
+function renderAdminAccess(state) {
+  adminAccessState = state || null;
+  const authenticated = Boolean(state?.authenticated);
+  const viaTrustedIp = Boolean(state?.viaTrustedIp);
+  if (adminAuthPanel) {
+    adminAuthPanel.hidden = authenticated;
+  }
+  if (adminAppShell) {
+    adminAppShell.hidden = !authenticated;
+  }
+  if (adminLogoutBtn) {
+    adminLogoutBtn.hidden = !authenticated || viaTrustedIp;
+  }
+  if (adminSelfUsernameInput) {
+    adminSelfUsernameInput.value = authenticated ? String(state?.username || "admin") : "";
+  }
+  if (adminAccessMessage) {
+    if (!state) {
+      adminAccessMessage.textContent = "";
+    } else if (authenticated && viaTrustedIp) {
+      adminAccessMessage.textContent = `当前访问 IP ${state.ip || "--"} 已在管理员白名单中，已自动免登录进入后台。`;
+    } else if (authenticated) {
+      adminAccessMessage.textContent = `当前已登录管理员账号：${state.username || "admin"}。`;
+    } else if (state.configured === false) {
+      adminAccessMessage.textContent = "后台鉴权尚未配置，请先在环境变量中设置管理员账号、密码和白名单 IP。";
+    } else {
+      adminAccessMessage.textContent = `当前访问 IP：${state.ip || "--"}，未命中白名单，请先登录管理员账号。`;
+    }
+  }
+  if (!authenticated) {
+    setAdminSelfPasswordMessage("");
+  }
+}
+
+async function fetchAdminSession() {
+  const response = await fetch("/api/admin/session");
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.message || "读取管理员状态失败");
+  }
+  return result;
+}
+
+async function ensureAdminAccess() {
+  const state = await fetchAdminSession();
+  renderAdminAccess(state);
+  if (state.authenticated && !adminDataLoaded) {
+    await loadInitialData();
+    adminDataLoaded = true;
+  }
+  return state;
 }
 
 function updateFormMode() {
@@ -112,8 +217,9 @@ function getAdminViewFromHash() {
 }
 
 function switchAdminView(viewName = DEFAULT_ADMIN_VIEW) {
+  currentAdminView = viewName || DEFAULT_ADMIN_VIEW;
   adminViewPanels.forEach((panel) => {
-    const shouldShow = panel.dataset.adminPanel === viewName;
+    const shouldShow = panel.dataset.adminPanel === currentAdminView;
     if (panel.id === "growth-customer-detail-panel") {
       panel.hidden = !shouldShow || !selectedGrowthCustomerId;
       return;
@@ -144,6 +250,243 @@ function setShareImagePreview(url, text = "") {
   shareImagePreview.hidden = false;
   shareImagePreviewImg.src = finalUrl;
   shareImagePreviewText.textContent = text || "已设置头图";
+}
+
+function formatFileSize(bytes) {
+  const value = Number(bytes || 0);
+  if (!value) {
+    return "0 KB";
+  }
+  if (value >= 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(2)} MB`;
+  }
+  return `${Math.max(1, Math.round(value / 1024))} KB`;
+}
+
+function renderMomentsImageList() {
+  if (!momentsImageList) {
+    return;
+  }
+
+  momentsImageList.innerHTML = momentsDraftImages.length
+    ? momentsDraftImages
+        .map(
+          (item) => `
+            <article class="moments-image-card">
+              <img src="${item.previewUrl}" alt="${escapeHtml(item.file.name || "朋友圈配图")}" />
+              <strong>${escapeHtml(item.file.name || "未命名图片")}</strong>
+              <span>${item.wasCompressed ? `已压缩到 ${formatFileSize(item.file.size)}` : `无需压缩，${formatFileSize(item.file.size)}`}</span>
+              <button type="button" class="secondary-btn" data-remove-moments-image="${item.id}">移除</button>
+            </article>
+          `
+        )
+        .join("")
+    : '<p class="empty">暂未选择图片。</p>';
+}
+
+function clearMomentsImages() {
+  momentsDraftImages.forEach((item) => {
+    try {
+      URL.revokeObjectURL(item.previewUrl);
+    } catch (error) {
+      // ignore object url cleanup failures
+    }
+  });
+  momentsDraftImages = [];
+  if (momentsImagesInput) {
+    momentsImagesInput.value = "";
+  }
+  renderMomentsImageList();
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("图片读取失败"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImageFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("图片解析失败"));
+    image.src = dataUrl;
+  });
+}
+
+function canvasToBlob(canvas, type, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("图片压缩失败"));
+        return;
+      }
+      resolve(blob);
+    }, type, quality);
+  });
+}
+
+async function compressImageToLimit(file, maxBytes = 1024 * 1024) {
+  if (!file || file.size <= maxBytes) {
+    return { file, wasCompressed: false };
+  }
+
+  const dataUrl = await readFileAsDataUrl(file);
+  const image = await loadImageFromDataUrl(dataUrl);
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("当前浏览器不支持图片压缩");
+  }
+
+  let width = image.naturalWidth || image.width;
+  let height = image.naturalHeight || image.height;
+  let quality = 0.9;
+  const outputType = file.type === "image/webp" ? "image/webp" : "image/jpeg";
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    canvas.width = Math.max(1, Math.round(width));
+    canvas.height = Math.max(1, Math.round(height));
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    const blob = await canvasToBlob(canvas, outputType, quality);
+    if (blob.size <= maxBytes || (canvas.width <= 1200 && quality <= 0.55)) {
+      const extension = outputType === "image/webp" ? "webp" : "jpg";
+      const nextName = String(file.name || "moments-image").replace(/\.[^.]+$/, "") || "moments-image";
+      const compressedFile = new File([blob], `${nextName}.${extension}`, {
+        type: outputType,
+        lastModified: Date.now()
+      });
+      return { file: compressedFile, wasCompressed: true };
+    }
+
+    if (quality > 0.6) {
+      quality -= 0.12;
+    } else {
+      width *= 0.85;
+      height *= 0.85;
+      quality = Math.max(0.5, quality - 0.05);
+    }
+  }
+
+  throw new Error(`图片“${file.name || "未命名"}”压缩失败，请换一张再试`);
+}
+
+async function prepareMomentsImages(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) {
+    clearMomentsImages();
+    return;
+  }
+
+  setMomentsMessage("正在处理朋友圈图片...", false);
+  if (momentsSubmitBtn) {
+    momentsSubmitBtn.disabled = true;
+  }
+
+  try {
+    clearMomentsImages();
+    const prepared = [];
+    for (const originalFile of files) {
+      if (!String(originalFile.type || "").startsWith("image/")) {
+        throw new Error(`文件“${originalFile.name || "未命名"}”不是图片`);
+      }
+
+      const processed = await compressImageToLimit(originalFile);
+      prepared.push({
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        file: processed.file,
+        wasCompressed: processed.wasCompressed,
+        previewUrl: URL.createObjectURL(processed.file)
+      });
+    }
+
+    momentsDraftImages = prepared;
+    renderMomentsImageList();
+    setMomentsMessage(`已准备 ${prepared.length} 张图片。`, false);
+  } catch (error) {
+    clearMomentsImages();
+    setMomentsMessage(error.message || "朋友圈图片处理失败", true);
+  } finally {
+    if (momentsSubmitBtn) {
+      momentsSubmitBtn.disabled = false;
+    }
+  }
+}
+
+async function uploadImageFile(file) {
+  const data = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const base64 = result.includes(",") ? result.split(",")[1] : "";
+      if (!base64) {
+        reject(new Error("图片读取失败"));
+        return;
+      }
+      resolve(base64);
+    };
+    reader.onerror = () => reject(new Error("图片读取失败"));
+    reader.readAsDataURL(file);
+  });
+
+  const response = await fetch("/api/uploads/image", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      filename: file.name,
+      contentType: file.type,
+      data
+    })
+  });
+
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.message || "图片上传失败");
+  }
+
+  return result.file || {};
+}
+
+function buildMomentsPayload(titleText, copyText, uploadedImages) {
+  const normalizedTitle = String(titleText || "").trim();
+  const normalizedText = String(copyText || "").trim();
+  const compactText = normalizedText.replace(/\s+/g, " ").trim();
+  const lines = normalizedText
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const titleSource = normalizedTitle || lines[0] || compactText || "朋友圈图文";
+  const title = titleSource.length > 28 ? `${titleSource.slice(0, 28)}...` : titleSource;
+  const summary = compactText.length > 88 ? `${compactText.slice(0, 88)}...` : compactText;
+
+  return {
+    page: "home",
+    groupKey: "article-center",
+    subKey: "featured-articles",
+    title,
+    summary: summary || title,
+    body: JSON.stringify({
+      schema: "moments-post-v1",
+      text: normalizedText,
+      images: uploadedImages.map((item) => ({
+        url: String(item.url || "").trim(),
+        name: String(item.name || "").trim()
+      }))
+    }),
+    externalUrl: "",
+    contentType: "article",
+    shareImageUrl: String(uploadedImages[0]?.url || "").trim(),
+    miniProgramName: "",
+    miniProgramAppId: "",
+    miniProgramPath: "",
+    miniProgramLaunchUrl: "",
+    miniProgramNote: ""
+  };
 }
 
 function clearShareImageFields() {
@@ -581,6 +924,73 @@ function renderUserProfileBlock(profile) {
   `;
 }
 
+function setAccountArchiveMessage(text, isError = false) {
+  if (!accountArchiveMessage) {
+    return;
+  }
+  accountArchiveMessage.textContent = text;
+  accountArchiveMessage.style.color = isError ? "#b42318" : "#7c2d12";
+}
+
+function fillAdminPasswordForm(userId = "", recoveryPhone = "") {
+  if (!adminPasswordForm) {
+    return;
+  }
+
+  adminPasswordUserIdInput.value = String(userId || "").trim();
+  adminPasswordRecoveryPhoneInput.value = String(recoveryPhone || "").trim();
+  adminPasswordForm.querySelector('[name="password"]').value = "";
+  adminPasswordForm.querySelector('[name="confirmPassword"]').value = "";
+}
+
+function renderAccountArchives() {
+  if (!accountArchiveList) {
+    return;
+  }
+
+  accountArchiveList.innerHTML = accountArchives.length
+    ? accountArchives
+        .map((item) => {
+          const profile = item.profile || null;
+          const account = item.account || {};
+          const vip = item.vip || {};
+          return `
+            <article class="user-card">
+              <div class="user-card__head">
+                <div>
+                  <h3>${escapeHtml(item.userId || "--")}</h3>
+                  ${renderUserProfileBlock(profile)}
+                  <div class="meta-row">
+                    <span>密码状态：${account.hasPassword ? "已设置" : "未设置"}</span>
+                    <span>预留手机：${escapeHtml(account.recoveryPhone || "未填写")}</span>
+                    <span>最近登录：${formatDateTime(account.lastLoginAt)}</span>
+                  </div>
+                  <div class="meta-row">
+                    <span>密码更新时间：${formatDateTime(account.passwordUpdatedAt)}</span>
+                    <span>重置申请时间：${formatDateTime(account.forgotPasswordRequestedAt)}</span>
+                    <span>会员状态：${vip.isVip ? "VIP" : "普通用户"}</span>
+                  </div>
+                </div>
+                <div class="user-card__stats">
+                  <strong>${account.hasPassword ? "已开通" : "未开通"}</strong>
+                  <span>密码登录</span>
+                </div>
+              </div>
+              <div class="chip-row">
+                <button
+                  class="chip"
+                  type="button"
+                  data-fill-account-user="${escapeHtml(item.userId)}"
+                  data-fill-account-phone="${escapeHtml(account.recoveryPhone || profile?.phone || "")}"
+                >填入上方改密</button>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : '<p class="empty">暂无账号档案数据。</p>';
+}
+
 function renderAnalyticsOverview() {
   const overview = analyticsData?.overview;
   if (!overview) {
@@ -796,6 +1206,7 @@ function renderGrowthDiffRow(label, beforeValue, afterValue) {
 
 function renderGrowthProjectList() {
   const customer = getSelectedGrowthCustomer();
+  const canShowGrowthDetail = currentAdminView === "growth-management";
   if (!customer) {
     growthCustomerDetailPanel.hidden = true;
     growthDetailTitle.textContent = "客户项目详情";
@@ -804,7 +1215,7 @@ function renderGrowthProjectList() {
     return;
   }
 
-  growthCustomerDetailPanel.hidden = false;
+  growthCustomerDetailPanel.hidden = !canShowGrowthDetail;
   growthDetailTitle.textContent = `${customer.customerName} · ${customer.growthLevel?.title || "青铜"}等级`;
   growthDetailSubtitle.textContent = `客户 ID：${customer.id}，待审核修改 ${customer.pendingChangeCount} 项，已完成 ${customer.completedCount} 个项目，共 ${customer.totalProjects} 个项目。`;
 
@@ -833,8 +1244,60 @@ function renderGrowthProjectList() {
                 <div class="growth-progress__bar">
                   <span style="width:${project.progress}%"></span>
                 </div>
-                <span class="growth-progress__text">${project.progress}%</span>
+                <span class="growth-progress__text" data-growth-progress-text="${project.id}">${project.progress}%</span>
               </div>
+              <form class="growth-project-form" data-growth-edit-form="${project.id}">
+                <div class="growth-project-form__grid">
+                  <label>
+                    项目名称
+                    <input
+                      type="text"
+                      name="loanProject"
+                      value="${escapeHtml(project.loanProject)}"
+                      placeholder="请输入项目名称"
+                      required
+                    />
+                  </label>
+                  <label>
+                    金额
+                    <input
+                      type="text"
+                      name="amount"
+                      value="${escapeHtml(project.amount)}"
+                      placeholder="请输入金额"
+                      required
+                    />
+                  </label>
+                  <label>
+                    项目状态
+                    <select name="status" data-growth-status="${project.id}">
+                      <option value="in_progress" ${project.status === "completed" ? "" : "selected"}>进行中</option>
+                      <option value="completed" ${project.status === "completed" ? "selected" : ""}>已完成</option>
+                    </select>
+                  </label>
+                  <label>
+                    进度百分比
+                    <input
+                      type="number"
+                      name="progress"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value="${project.progress}"
+                      data-growth-progress="${project.id}"
+                      placeholder="请输入 0-100"
+                      required
+                    />
+                  </label>
+                  <label class="growth-project-form__full">
+                    详细信息
+                    <textarea name="details" rows="4" placeholder="补充项目详细情况" required>${escapeHtml(project.details)}</textarea>
+                  </label>
+                </div>
+                <div class="chip-row">
+                  <button class="chip chip--primary" type="submit">保存修改</button>
+                </div>
+              </form>
               ${
                 pendingRequests.length
                   ? `
@@ -1170,6 +1633,16 @@ async function loadVipUsers() {
   renderVipUsers();
 }
 
+async function loadAccountArchives() {
+  const response = await fetch("/api/users/accounts");
+  if (!response.ok) {
+    throw new Error("加载账号档案失败");
+  }
+  const result = await response.json();
+  accountArchives = result.accounts || [];
+  renderAccountArchives();
+}
+
 async function loadGrowthCustomers(preferredCustomerId = selectedGrowthCustomerId) {
   const response = await fetch("/api/growth/customers");
   if (!response.ok) {
@@ -1206,7 +1679,8 @@ async function loadInitialData() {
     loadNotes(),
     loadVipUsers(),
     loadGrowthCustomers(),
-    loadAnalytics()
+    loadAnalytics(),
+    loadAccountArchives()
   ]);
 
   const loaders = [
@@ -1243,6 +1717,13 @@ async function loadInitialData() {
       failed: results[4].status === "rejected",
       onError: () => {
         setAnalyticsMessage("浏览痕迹初始化失败，请检查后端服务。", true);
+      }
+    },
+    {
+      key: "accounts",
+      failed: results[5].status === "rejected",
+      onError: () => {
+        setAccountArchiveMessage("账号档案初始化失败，请检查后端服务。", true);
       }
     }
   ];
@@ -1329,6 +1810,136 @@ refreshGrowthCustomersBtn.addEventListener("click", async () => {
   }
 });
 
+if (refreshAccountArchivesBtn) {
+  refreshAccountArchivesBtn.addEventListener("click", async () => {
+    setAccountArchiveMessage("正在刷新账号档案...", false);
+    try {
+      await loadAccountArchives();
+      setAccountArchiveMessage("账号档案已刷新。", false);
+    } catch {
+      setAccountArchiveMessage("刷新失败，请检查后端服务。", true);
+    }
+  });
+}
+
+if (adminLoginForm) {
+  adminLoginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    setAdminLoginMessage("正在验证管理员账号...", false);
+
+    const formData = new FormData(adminLoginForm);
+    const payload = {
+      username: String(formData.get("username") || "").trim(),
+      password: String(formData.get("password") || "").trim()
+    };
+
+    try {
+      const response = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setAdminLoginMessage(result.message || "管理员登录失败", true);
+        return;
+      }
+
+      adminLoginForm.reset();
+      setAdminLoginMessage(result.viaTrustedIp ? "当前 IP 已在白名单中，已自动放行。" : "管理员登录成功。", false);
+      await ensureAdminAccess();
+    } catch {
+      setAdminLoginMessage("管理员登录失败，请稍后重试。", true);
+    }
+  });
+}
+
+if (adminLogoutBtn) {
+  adminLogoutBtn.addEventListener("click", async () => {
+    try {
+      await fetch("/api/admin/logout", { method: "POST" });
+    } catch {
+      // ignore logout network errors and still refresh state
+    }
+    adminDataLoaded = false;
+    setAdminLoginMessage("已退出管理员登录。", false);
+    await ensureAdminAccess().catch(() => {
+      renderAdminAccess({ authenticated: false, configured: true, ip: "", viaTrustedIp: false });
+    });
+  });
+}
+
+if (adminSelfPasswordForm) {
+  adminSelfPasswordForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    setAdminSelfPasswordMessage("正在更新管理员密码...", false);
+
+    const formData = new FormData(adminSelfPasswordForm);
+    const payload = {
+      currentPassword: String(formData.get("currentPassword") || "").trim(),
+      newPassword: String(formData.get("newPassword") || "").trim(),
+      confirmPassword: String(formData.get("confirmPassword") || "").trim()
+    };
+
+    try {
+      const response = await fetch("/api/admin/password/change", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setAdminSelfPasswordMessage(result.message || "管理员密码修改失败", true);
+        return;
+      }
+
+      adminSelfPasswordForm.reset();
+      if (adminSelfUsernameInput) {
+        adminSelfUsernameInput.value = String(result.username || adminAccessState?.username || "admin");
+      }
+      setAdminSelfPasswordMessage("管理员密码已更新，新密码已立即生效。", false);
+    } catch {
+      setAdminSelfPasswordMessage("管理员密码修改失败，请稍后重试。", true);
+    }
+  });
+}
+
+if (adminPasswordForm) {
+  adminPasswordForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    setAccountArchiveMessage("正在修改密码...", false);
+
+    const formData = new FormData(adminPasswordForm);
+    const payload = {
+      userId: String(formData.get("userId") || "").trim(),
+      password: String(formData.get("password") || "").trim(),
+      confirmPassword: String(formData.get("confirmPassword") || "").trim(),
+      recoveryPhone: String(formData.get("recoveryPhone") || "").trim()
+    };
+
+    try {
+      const response = await fetch("/api/users/password/admin-set", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setAccountArchiveMessage(result.message || "修改密码失败", true);
+        return;
+      }
+
+      const targetUserId = result.account?.userId || payload.userId;
+      const recoveryPhone = result.account?.recoveryPhone || payload.recoveryPhone || "未填写";
+      fillAdminPasswordForm(targetUserId, result.account?.recoveryPhone || payload.recoveryPhone || "");
+      setAccountArchiveMessage(`已为用户 ${targetUserId} 更新密码，预留手机号为 ${recoveryPhone}。`, false);
+      await loadAccountArchives();
+    } catch {
+      setAccountArchiveMessage("修改密码失败，请稍后重试。", true);
+    }
+  });
+}
+
 clearAnalyticsBtn.addEventListener("click", async () => {
   const confirmed = window.confirm("确认清空全部用户浏览痕迹吗？此操作无法恢复。");
   if (!confirmed) {
@@ -1380,6 +1991,41 @@ if (clearShareImageBtn) {
   clearShareImageBtn.addEventListener("click", () => {
     clearShareImageFields();
     setMessage("已清空头图。", false);
+  });
+}
+
+if (momentsImagesInput) {
+  momentsImagesInput.addEventListener("change", async () => {
+    await prepareMomentsImages(momentsImagesInput.files || []);
+  });
+}
+
+if (clearMomentsImagesBtn) {
+  clearMomentsImagesBtn.addEventListener("click", () => {
+    clearMomentsImages();
+    setMomentsMessage("已清空朋友圈图片。", false);
+  });
+}
+
+if (momentsImageList) {
+  momentsImageList.addEventListener("click", (event) => {
+    const removeButton = event.target.closest("[data-remove-moments-image]");
+    if (!removeButton) {
+      return;
+    }
+
+    const targetId = removeButton.dataset.removeMomentsImage || "";
+    const target = momentsDraftImages.find((item) => item.id === targetId);
+    if (target?.previewUrl) {
+      try {
+        URL.revokeObjectURL(target.previewUrl);
+      } catch (error) {
+        // ignore preview cleanup failures
+      }
+    }
+    momentsDraftImages = momentsDraftImages.filter((item) => item.id !== targetId);
+    renderMomentsImageList();
+    setMomentsMessage("已移除选中的图片。", false);
   });
 }
 
@@ -1487,6 +2133,17 @@ vipUserList.addEventListener("click", (event) => {
   setVipMessage("已填入用户 ID，可直接授予 VIP 时间。", false);
 });
 
+accountArchiveList.addEventListener("click", (event) => {
+  const fillButton = event.target.closest("[data-fill-account-user]");
+  if (!fillButton) {
+    return;
+  }
+
+  fillAdminPasswordForm(fillButton.dataset.fillAccountUser || "", fillButton.dataset.fillAccountPhone || "");
+  adminPasswordUserIdInput.focus();
+  setAccountArchiveMessage("已填入用户名，可直接在上方修改密码。", false);
+});
+
 growthCustomerList.addEventListener("click", async (event) => {
   const detailButton = event.target.closest("[data-growth-detail-id]");
   if (!detailButton) {
@@ -1517,16 +2174,40 @@ growthProjectList.addEventListener("input", (event) => {
   }
 
   const projectId = progressInput.dataset.growthProgress;
+  const normalizedValue = Math.max(0, Math.min(100, Number(progressInput.value) || 0));
+  progressInput.value = normalizedValue;
   const nextText = growthProjectList.querySelector(`[data-growth-progress-text="${projectId}"]`);
   const bar = progressInput
     .closest(".growth-project-editor")
     ?.querySelector(".growth-progress__bar span");
+  const statusField = growthProjectList.querySelector(`[data-growth-status="${projectId}"]`);
 
   if (nextText) {
-    nextText.textContent = `${progressInput.value}%`;
+    nextText.textContent = `${normalizedValue}%`;
   }
   if (bar) {
-    bar.style.width = `${progressInput.value}%`;
+    bar.style.width = `${normalizedValue}%`;
+  }
+  if (statusField && normalizedValue >= 100) {
+    statusField.value = "completed";
+  }
+});
+
+growthProjectList.addEventListener("change", (event) => {
+  const statusField = event.target.closest("[data-growth-status]");
+  if (!statusField) {
+    return;
+  }
+
+  const projectId = statusField.dataset.growthStatus;
+  const progressInput = growthProjectList.querySelector(`[data-growth-progress="${projectId}"]`);
+  if (!progressInput) {
+    return;
+  }
+
+  if (statusField.value === "completed" && Number(progressInput.value || 0) < 100) {
+    progressInput.value = 100;
+    progressInput.dispatchEvent(new Event("input", { bubbles: true }));
   }
 });
 
@@ -1560,6 +2241,44 @@ growthProjectList.addEventListener("click", async (event) => {
     await loadGrowthCustomers(selectedGrowthCustomerId);
   } catch {
     setGrowthMessage("审核失败，请稍后重试。", true);
+  }
+});
+
+growthProjectList.addEventListener("submit", async (event) => {
+  const editForm = event.target.closest("[data-growth-edit-form]");
+  if (!editForm) {
+    return;
+  }
+
+  event.preventDefault();
+  const projectId = editForm.dataset.growthEditForm || "";
+  if (!projectId) {
+    setGrowthMessage("未找到要更新的项目。", true);
+    return;
+  }
+
+  const formData = new FormData(editForm);
+  const payload = Object.fromEntries(formData.entries());
+  payload.progress = Math.max(0, Math.min(100, Number(payload.progress) || 0));
+
+  setGrowthMessage("正在保存项目修改...", false);
+
+  try {
+    const response = await fetch(`/api/growth/projects/${projectId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      setGrowthMessage(result.message || "保存失败", true);
+      return;
+    }
+
+    setGrowthMessage(`项目“${payload.loanProject || "未命名项目"}”已更新。`, false);
+    await loadGrowthCustomers(selectedGrowthCustomerId);
+  } catch {
+    setGrowthMessage("保存失败，请稍后重试。", true);
   }
 });
 
@@ -1692,6 +2411,68 @@ form.addEventListener("submit", async (event) => {
   await loadContents();
 });
 
+if (momentsForm) {
+  momentsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const titleText = String(momentsTitleInput?.value || "").trim();
+    const copyText = String(momentsCopyInput?.value || "").trim();
+    if (!copyText) {
+      setMomentsMessage("请先填写朋友圈文案。", true);
+      return;
+    }
+    if (!momentsDraftImages.length) {
+      setMomentsMessage("请至少上传一张图片。", true);
+      return;
+    }
+
+    if (momentsSubmitBtn) {
+      momentsSubmitBtn.disabled = true;
+    }
+    setMomentsMessage(`正在上传 ${momentsDraftImages.length} 张图片并发布内容...`, false);
+
+    try {
+      const uploadedImages = [];
+      for (let index = 0; index < momentsDraftImages.length; index += 1) {
+        const current = momentsDraftImages[index];
+        setMomentsMessage(`正在上传第 ${index + 1}/${momentsDraftImages.length} 张图片...`, false);
+        const uploaded = await uploadImageFile(current.file);
+        uploadedImages.push({
+          url: uploaded.url || "",
+          name: current.file.name || ""
+        });
+      }
+
+      const payload = buildMomentsPayload(titleText, copyText, uploadedImages);
+      const response = await fetch("/api/content", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.message || "发布失败");
+      }
+
+      momentsForm.reset();
+      clearMomentsImages();
+      setMomentsMessage("朋友圈图文已发布。", false);
+      await loadContents();
+      window.location.hash = "#content-management";
+      selectedContentCategory = "articles";
+      selectedContentSubsection = "featured-articles";
+      selectedContentId = result.content?.id || "";
+      renderAdminList();
+    } catch (error) {
+      setMomentsMessage(error.message || "发布失败，请稍后重试。", true);
+    } finally {
+      if (momentsSubmitBtn) {
+        momentsSubmitBtn.disabled = false;
+      }
+    }
+  });
+}
+
 noteForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   setNoteMessage(noteEditingId ? "正在保存 Note..." : "正在新增 Note...", false);
@@ -1723,10 +2504,14 @@ noteForm.addEventListener("submit", async (event) => {
   await loadNotes();
 });
 
-loadInitialData().catch(() => {
-  setMessage("初始化失败，请检查配置或内容接口。", true);
+ensureAdminAccess().catch((error) => {
+  renderAdminAccess({ authenticated: false, configured: true, ip: "", viaTrustedIp: false });
+  setAdminLoginMessage(error.message || "初始化管理员状态失败，请稍后重试。", true);
 });
 
 window.setInterval(() => {
+  if (!adminAccessState?.authenticated || currentAdminView !== "growth-management") {
+    return;
+  }
   loadGrowthCustomers(selectedGrowthCustomerId).catch(() => {});
 }, 15000);

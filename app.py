@@ -1,5 +1,6 @@
 import json
 import hashlib
+import hmac
 import base64
 import mimetypes
 import os
@@ -33,6 +34,9 @@ SHARE_DEBUG_FILE = DATA_DIR / "share-debug.json"
 HOST = "127.0.0.1"
 PORT = 3000
 MAX_UPLOAD_SIZE = 5 * 1024 * 1024
+AUTH_SESSION_COOKIE = "zhishiku_auth_session"
+AUTH_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
+ADMIN_SESSION_COOKIE = "zhishiku_admin_session"
 
 
 def load_dotenv():
@@ -66,6 +70,14 @@ MINI_PROGRAM_URL_LINK_EXPIRE_DAYS = min(max(int(os.getenv("MINI_PROGRAM_URL_LINK
 WECHAT_PAY_MCH_ID = str(os.getenv("WECHAT_PAY_MCH_ID", "")).strip()
 WECHAT_PAY_SERIAL_NO = str(os.getenv("WECHAT_PAY_SERIAL_NO", "")).strip()
 WECHAT_PAY_NOTIFY_URL = str(os.getenv("WECHAT_PAY_NOTIFY_URL", "")).strip()
+ADMIN_USERNAME = str(os.getenv("ADMIN_USERNAME", "")).strip()
+ADMIN_PASSWORD = str(os.getenv("ADMIN_PASSWORD", "")).strip()
+ADMIN_SESSION_TTL_SECONDS = max(int(os.getenv("ADMIN_SESSION_TTL_HOURS", "12") or "12"), 1) * 60 * 60
+ADMIN_TRUSTED_IPS = {
+    str(item or "").strip().replace("::ffff:", "")
+    for item in re.split(r"[\s,]+", str(os.getenv("ADMIN_TRUSTED_IPS", os.getenv("ADMIN_TRUSTED_IP", "")) or "").strip())
+    if str(item or "").strip()
+}
 
 
 def load_pem_value(raw_value: str, file_path: str):
@@ -139,7 +151,23 @@ LOAN_SUBSECTIONS = [
     {"key": "redeem-bridge-funding", "label": "\u8d4e\u697c\u57ab\u8d44"},
     {"key": "car-loan", "label": "\u8f66\u8d37"},
 ]
+ARTICLE_SUBSECTIONS = [{"key": "featured-articles", "label": "\u7cbe\u9009\u6587\u7ae0"}]
 TOOL_SUBSECTIONS = [{"key": "featured-tools", "label": "\u7cbe\u9009\u5de5\u5177"}]
+SECTION_KEY_ALIASES = {
+    "bank-loans": "bank-credit-loan",
+}
+
+
+def normalize_content_group_key(page: str, group_key: str, sub_key: str = ""):
+    if str(page or "").strip() != "home":
+        return str(group_key or "").strip()
+    safe_group_key = str(group_key or "").strip()
+    safe_sub_key = str(sub_key or "").strip()
+    if safe_sub_key == "featured-articles":
+        return "article-center"
+    if safe_sub_key == "featured-tools":
+        return "tools-links"
+    return safe_group_key
 
 DEFAULT_DATA = {
     "sections": {
@@ -147,20 +175,19 @@ DEFAULT_DATA = {
             "label": "\u9996\u9875",
             "groups": [
                 {
+                    "key": "article-center",
+                    "label": "\u670b\u53cb\u5708\u56fe\u6587",
+                    "children": ARTICLE_SUBSECTIONS,
+                },
+                {
                     "key": LOAN_GROUP_KEY,
-                    "label": "\u8d37\u6b3e\u79cd\u7c7b",
+                    "label": "\u6587\u7ae0\u83b7\u5ba2",
                     "children": LOAN_SUBSECTIONS,
                 },
                 {
                     "key": "tools-links",
-                    "label": "\u5de5\u5177\u94fe\u63a5",
+                    "label": "\u7cbe\u9009\u5de5\u5177",
                     "children": TOOL_SUBSECTIONS,
-                },
-                {
-                    "key": "article-center",
-                    "label": "\u6587\u7ae0",
-                    "adminOnly": True,
-                    "children": [{"key": "featured-articles", "label": "\u7cbe\u9009\u6587\u7ae0"}],
                 },
             ],
         },
@@ -178,7 +205,7 @@ DEFAULT_DATA = {
             ],
         },
         "achievements": {
-            "label": "\u6210\u957f\u4f53\u7cfb",
+            "label": "\u79ef\u5206",
             "groups": [
                 {
                     "key": "medals",
@@ -195,6 +222,8 @@ DEFAULT_DATA = {
     "notes": [],
     "growthCustomers": [],
     "userProfiles": {},
+    "userAccounts": {},
+    "authSessions": {},
     "vipUsers": {},
     "rechargeOrders": [],
 }
@@ -227,7 +256,10 @@ def read_json(file_path: Path):
 
 
 def write_json(file_path: Path, data: dict):
-    file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = file_path.with_name(f"{file_path.name}.tmp")
+    temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(file_path)
 
 
 def read_share_debug():
@@ -282,6 +314,12 @@ def read_data():
         data["growthCustomers"] = []
     if not isinstance(data.get("userProfiles"), dict):
         data["userProfiles"] = {}
+    if not isinstance(data.get("userAccounts"), dict):
+        data["userAccounts"] = {}
+    if not isinstance(data.get("authSessions"), dict):
+        data["authSessions"] = {}
+    if not isinstance(data.get("adminSessions"), dict):
+        data["adminSessions"] = {}
     if not isinstance(data.get("vipUsers"), dict):
         data["vipUsers"] = {}
     if not isinstance(data.get("rechargeOrders"), list):
@@ -351,6 +389,379 @@ def normalize_user_profile_record(user_id: str, record: dict | None = None):
     }
 
 
+def normalize_user_account_record(user_id: str, record: dict | None = None):
+    current = record or {}
+    return {
+        "userId": str(user_id or current.get("userId", "")).strip(),
+        "passwordHash": str(current.get("passwordHash", "")).strip(),
+        "passwordSalt": str(current.get("passwordSalt", "")).strip(),
+        "passwordUpdatedAt": str(current.get("passwordUpdatedAt", "")).strip(),
+        "recoveryPhone": str(current.get("recoveryPhone", "")).strip(),
+        "lastLoginAt": str(current.get("lastLoginAt", "")).strip(),
+        "createdAt": str(current.get("createdAt", "")).strip(),
+        "updatedAt": str(current.get("updatedAt", "")).strip(),
+        "forgotPasswordRequestedAt": str(current.get("forgotPasswordRequestedAt", "")).strip(),
+    }
+
+
+def get_user_account(data: dict, user_id: str):
+    safe_user_id = str(user_id or "").strip()
+    if not safe_user_id:
+        return None
+    record = data.get("userAccounts", {}).get(safe_user_id)
+    if not isinstance(record, dict):
+        return None
+    return normalize_user_account_record(safe_user_id, record)
+
+
+def mask_phone_number(phone: str):
+    clean = str(phone or "").strip()
+    if len(clean) < 7:
+        return clean
+    return f"{clean[:3]}****{clean[-4:]}"
+
+
+def build_user_account_summary(data: dict, user_id: str):
+    account = get_user_account(data, user_id)
+    if not account:
+        return {
+            "userId": str(user_id or "").strip(),
+            "hasPassword": False,
+            "recoveryPhone": "",
+            "recoveryPhoneMasked": "",
+            "lastLoginAt": "",
+            "passwordUpdatedAt": "",
+            "createdAt": "",
+            "updatedAt": "",
+            "forgotPasswordRequestedAt": "",
+        }
+
+    return {
+        "userId": account["userId"],
+        "hasPassword": bool(account["passwordHash"] and account["passwordSalt"]),
+        "recoveryPhone": account["recoveryPhone"],
+        "recoveryPhoneMasked": mask_phone_number(account["recoveryPhone"]),
+        "lastLoginAt": account["lastLoginAt"],
+        "passwordUpdatedAt": account["passwordUpdatedAt"],
+        "createdAt": account["createdAt"],
+        "updatedAt": account["updatedAt"],
+        "forgotPasswordRequestedAt": account["forgotPasswordRequestedAt"],
+    }
+
+
+def hash_password(password: str, salt: str):
+    return hashlib.pbkdf2_hmac(
+        "sha256",
+        str(password or "").encode("utf-8"),
+        str(salt or "").encode("utf-8"),
+        120000,
+    ).hex()
+
+
+def set_account_password(account: dict, password: str, *, recovery_phone: str = ""):
+    now = datetime.now(tz=timezone.utc).isoformat()
+    next_account = normalize_user_account_record(account.get("userId", ""), account)
+    salt = secrets.token_hex(16)
+    next_account["passwordSalt"] = salt
+    next_account["passwordHash"] = hash_password(password, salt)
+    next_account["passwordUpdatedAt"] = now
+    next_account["updatedAt"] = now
+    next_account["createdAt"] = next_account["createdAt"] or now
+    if str(recovery_phone or "").strip():
+        next_account["recoveryPhone"] = str(recovery_phone).strip()
+    return next_account
+
+
+def verify_account_password(account: dict, password: str):
+    if not account or not account.get("passwordHash") or not account.get("passwordSalt"):
+        return False
+    expected = hash_password(password, account["passwordSalt"])
+    return hmac.compare_digest(expected, account["passwordHash"])
+
+
+def upsert_user_account(data: dict, user_id: str, *, recovery_phone: str = ""):
+    current = get_user_account(data, user_id) or {}
+    now = datetime.now(tz=timezone.utc).isoformat()
+    account = normalize_user_account_record(
+        user_id,
+        {
+            **current,
+            "userId": user_id,
+            "recoveryPhone": str(recovery_phone or current.get("recoveryPhone", "")).strip(),
+            "createdAt": current.get("createdAt", "") or now,
+            "updatedAt": now,
+        },
+    )
+    data.setdefault("userAccounts", {})[user_id] = account
+    return account
+
+
+def clear_expired_auth_sessions(data: dict):
+    sessions = data.get("authSessions", {})
+    if not isinstance(sessions, dict):
+        data["authSessions"] = {}
+        return
+
+    now = datetime.now(tz=timezone.utc)
+    active_sessions = {}
+    for token, raw_session in sessions.items():
+        if not isinstance(raw_session, dict):
+            continue
+        expires_at = str(raw_session.get("expiresAt", "")).strip()
+        try:
+            expires_at_dt = datetime.fromisoformat(expires_at) if expires_at else None
+        except ValueError:
+            expires_at_dt = None
+        if not expires_at_dt:
+            continue
+        if expires_at_dt.tzinfo is None:
+            expires_at_dt = expires_at_dt.replace(tzinfo=timezone.utc)
+        if expires_at_dt <= now:
+            continue
+        active_sessions[str(token)] = {
+            "userId": str(raw_session.get("userId", "")).strip(),
+            "createdAt": str(raw_session.get("createdAt", "")).strip(),
+            "expiresAt": expires_at_dt.isoformat(),
+        }
+
+    data["authSessions"] = active_sessions
+
+
+def get_auth_session_token_from_request(handler: BaseHTTPRequestHandler):
+    return str(parse_request_cookies(handler).get(AUTH_SESSION_COOKIE, "")).strip()
+
+
+def get_authenticated_user_id(data: dict, handler: BaseHTTPRequestHandler):
+    clear_expired_auth_sessions(data)
+    token = get_auth_session_token_from_request(handler)
+    if not token:
+        return ""
+    session = data.get("authSessions", {}).get(token)
+    if not isinstance(session, dict):
+        return ""
+    return str(session.get("userId", "")).strip()
+
+
+def create_auth_session(data: dict, user_id: str):
+    clear_expired_auth_sessions(data)
+    token = secrets.token_urlsafe(32)
+    now = datetime.now(tz=timezone.utc)
+    data.setdefault("authSessions", {})[token] = {
+        "userId": str(user_id or "").strip(),
+        "createdAt": now.isoformat(),
+        "expiresAt": (now + timedelta(seconds=AUTH_SESSION_TTL_SECONDS)).isoformat(),
+    }
+    return token
+
+
+def revoke_auth_session(data: dict, token: str):
+    safe_token = str(token or "").strip()
+    if safe_token and isinstance(data.get("authSessions"), dict):
+        data["authSessions"].pop(safe_token, None)
+
+
+def is_admin_auth_configured():
+    return bool(ADMIN_USERNAME and ADMIN_PASSWORD)
+
+
+def cleanup_admin_sessions(data: dict):
+    sessions = data.get("adminSessions", {})
+    if not isinstance(sessions, dict):
+        data["adminSessions"] = {}
+        return
+
+    now = datetime.now(tz=timezone.utc)
+    active_sessions = {}
+    for token, raw_session in sessions.items():
+        if not isinstance(raw_session, dict):
+            continue
+        expires_at = str(raw_session.get("expiresAt", "")).strip()
+        try:
+            expires_at_dt = datetime.fromisoformat(expires_at) if expires_at else None
+        except ValueError:
+            expires_at_dt = None
+        if not expires_at_dt:
+            continue
+        if expires_at_dt.tzinfo is None:
+            expires_at_dt = expires_at_dt.replace(tzinfo=timezone.utc)
+        if expires_at_dt <= now:
+            continue
+        active_sessions[str(token)] = {
+            "username": str(raw_session.get("username", "")).strip(),
+            "createdAt": str(raw_session.get("createdAt", "")).strip(),
+            "updatedAt": str(raw_session.get("updatedAt", "")).strip(),
+            "expiresAt": expires_at_dt.isoformat(),
+        }
+
+    data["adminSessions"] = active_sessions
+
+
+def get_admin_session_token_from_request(handler: BaseHTTPRequestHandler):
+    return str(parse_request_cookies(handler).get(ADMIN_SESSION_COOKIE, "")).strip()
+
+
+def is_trusted_admin_ip(handler: BaseHTTPRequestHandler):
+    return get_request_ip(handler) in ADMIN_TRUSTED_IPS
+
+
+def get_admin_auth_state(data: dict, handler: BaseHTTPRequestHandler):
+    cleanup_admin_sessions(data)
+    request_ip = get_request_ip(handler)
+
+    if is_trusted_admin_ip(handler):
+        return {
+            "authenticated": True,
+            "username": ADMIN_USERNAME or "admin",
+            "viaTrustedIp": True,
+            "ip": request_ip,
+            "configured": is_admin_auth_configured(),
+        }
+
+    if not is_admin_auth_configured():
+        return {
+            "authenticated": False,
+            "username": "",
+            "viaTrustedIp": False,
+            "ip": request_ip,
+            "configured": False,
+        }
+
+    token = get_admin_session_token_from_request(handler)
+    session = data.get("adminSessions", {}).get(token)
+    if not isinstance(session, dict):
+        return {
+            "authenticated": False,
+            "username": "",
+            "viaTrustedIp": False,
+            "ip": request_ip,
+            "configured": True,
+        }
+
+    expires_at = str(session.get("expiresAt", "")).strip()
+    try:
+        expires_at_dt = datetime.fromisoformat(expires_at) if expires_at else None
+    except ValueError:
+        expires_at_dt = None
+
+    if not expires_at_dt:
+        data.get("adminSessions", {}).pop(token, None)
+        return {
+            "authenticated": False,
+            "username": "",
+            "viaTrustedIp": False,
+            "ip": request_ip,
+            "configured": True,
+        }
+
+    if expires_at_dt.tzinfo is None:
+        expires_at_dt = expires_at_dt.replace(tzinfo=timezone.utc)
+
+    if expires_at_dt <= datetime.now(tz=timezone.utc) or str(session.get("username", "")).strip() != ADMIN_USERNAME:
+        data.get("adminSessions", {}).pop(token, None)
+        return {
+            "authenticated": False,
+            "username": "",
+            "viaTrustedIp": False,
+            "ip": request_ip,
+            "configured": True,
+        }
+
+    return {
+        "authenticated": True,
+        "username": str(session.get("username", "")).strip() or ADMIN_USERNAME or "admin",
+        "viaTrustedIp": False,
+        "ip": request_ip,
+        "configured": True,
+        "expiresAt": expires_at_dt.isoformat(),
+    }
+
+
+def create_admin_session(data: dict, username: str):
+    cleanup_admin_sessions(data)
+    token = secrets.token_urlsafe(32)
+    now = datetime.now(tz=timezone.utc)
+    data.setdefault("adminSessions", {})[token] = {
+        "username": str(username or "").strip(),
+        "createdAt": now.isoformat(),
+        "updatedAt": now.isoformat(),
+        "expiresAt": (now + timedelta(seconds=ADMIN_SESSION_TTL_SECONDS)).isoformat(),
+    }
+    return token
+
+
+def revoke_admin_session(data: dict, token: str):
+    safe_token = str(token or "").strip()
+    if safe_token and isinstance(data.get("adminSessions"), dict):
+        data["adminSessions"].pop(safe_token, None)
+
+
+def build_cookie_header(name: str, value: str, *, max_age: int | None = None, http_only: bool = True, same_site: str = "Lax", path: str = "/"):
+    parts = [f"{name}={quote(str(value or ''))}", f"Path={path}"]
+    if max_age is not None:
+        parts.append(f"Max-Age={int(max_age)}")
+    if http_only:
+        parts.append("HttpOnly")
+    if same_site:
+        parts.append(f"SameSite={same_site}")
+    return "; ".join(parts)
+
+
+def update_env_value(key: str, value: str):
+    env_file = BASE_DIR / ".env"
+    if not env_file.exists():
+        env_file.write_text(f"{key}={value}\n", encoding="utf-8")
+        return
+
+    lines = env_file.read_text(encoding="utf-8").splitlines()
+    replaced = False
+    next_lines = []
+    for line in lines:
+        if "=" in line and not line.lstrip().startswith("#"):
+            current_key = line.split("=", 1)[0].strip()
+            if current_key == key:
+                next_lines.append(f"{key}={value}")
+                replaced = True
+                continue
+        next_lines.append(line)
+
+    if not replaced:
+        next_lines.append(f"{key}={value}")
+
+    env_file.write_text("\n".join(next_lines) + "\n", encoding="utf-8")
+
+
+def get_all_user_account_archives(data: dict):
+    analytics = read_analytics()
+    user_ids = (
+        set(data.get("userProfiles", {}).keys())
+        | set(data.get("userAccounts", {}).keys())
+        | set(data.get("vipUsers", {}).keys())
+        | set(analytics.get("users", {}).keys())
+    )
+    records = []
+    for user_id in sorted(user_ids):
+        profile = get_user_profile(data, user_id)
+        vip = build_vip_user_summary(data, user_id, data.get("vipUsers", {}).get(user_id, {}))
+        account = build_user_account_summary(data, user_id)
+        records.append(
+            {
+                "userId": user_id,
+                "profile": profile,
+                "account": account,
+                "vip": vip,
+            }
+        )
+
+    records.sort(
+        key=lambda item: (
+            str(item.get("profile", {}).get("updatedAt") if item.get("profile") else "") or str(item.get("account", {}).get("updatedAt", "")),
+            item.get("userId", ""),
+        ),
+        reverse=True,
+    )
+    return records
+
+
 def get_user_profile(data: dict, user_id: str):
     current_user_id = str(user_id or "").strip()
     if not current_user_id:
@@ -371,16 +782,19 @@ def sanitize_user_profile_payload(payload: dict):
         "introduction": str(payload.get("introduction") or payload.get("bio") or "").strip(),
         "phone": str(payload.get("phone", "")).strip(),
         "wechat": str(payload.get("wechat", "")).strip(),
+        "password": str(payload.get("password", "")).strip(),
+        "confirmPassword": str(payload.get("confirmPassword", "")).strip(),
+        "recoveryPhone": str(payload.get("recoveryPhone", "")).strip(),
     }
 
 
 def validate_user_profile_payload(payload: dict):
     if not payload["userId"]:
         return "userId required"
-    if not payload["avatarUrl"]:
-        return "avatarUrl required"
-    if not payload["phone"]:
-        return "phone required"
+    if payload["password"] and len(payload["password"]) < 6:
+        return "password must be at least 6 characters"
+    if payload["password"] != payload["confirmPassword"]:
+        return "password confirmation mismatch"
     return ""
 
 
@@ -433,6 +847,22 @@ def migrate_user_identity(data: dict, analytics: dict, previous_user_id: str, ne
         }
         data["userProfiles"].pop(old_user_id, None)
 
+    if isinstance(data.get("userAccounts", {}).get(old_user_id), dict):
+        existing_account = data["userAccounts"].get(new_user_id, {})
+        data["userAccounts"][new_user_id] = {
+            **data["userAccounts"][old_user_id],
+            **existing_account,
+            "userId": new_user_id,
+        }
+        data["userAccounts"].pop(old_user_id, None)
+
+    if isinstance(data.get("authSessions"), dict):
+        for token, session in list(data["authSessions"].items()):
+            if not isinstance(session, dict):
+                continue
+            if str(session.get("userId", "")).strip() == old_user_id:
+                data["authSessions"][token] = {**session, "userId": new_user_id}
+
     if isinstance(data.get("vipUsers", {}).get(old_user_id), dict):
         current_record = normalize_vip_user_record(old_user_id, data["vipUsers"][old_user_id])
         existing_record = normalize_vip_user_record(new_user_id, data["vipUsers"][new_user_id]) if isinstance(data["vipUsers"].get(new_user_id), dict) else None
@@ -480,6 +910,7 @@ def is_reserved_user_id(data: dict, analytics: dict, previous_user_id: str, targ
         return False
     return bool(
         data.get("userProfiles", {}).get(new_user_id)
+        or data.get("userAccounts", {}).get(new_user_id)
         or data.get("vipUsers", {}).get(new_user_id)
         or analytics.get("users", {}).get(new_user_id)
     )
@@ -521,6 +952,7 @@ def build_vip_user_summary(data: dict, user_id: str, record: dict | None = None)
         **current,
         **status,
         "profile": profile,
+        "account": build_user_account_summary(data, user_id),
         "totalClicks": int(analytics_user.get("totalClicks", 0) or 0),
         "totalShares": int(analytics_user.get("totalShares", 0) or 0),
         "firstSeenAt": str(analytics_user.get("firstSeenAt", "")).strip(),
@@ -636,11 +1068,16 @@ def resolve_meta(data: dict, page: str, group_key: str, sub_key: str):
     if not page_cfg:
         return None
 
-    group = next((item for item in page_cfg["groups"] if item["key"] == group_key), None)
+    normalized_group_key = normalize_content_group_key(page, group_key, sub_key)
+    group = next((item for item in page_cfg["groups"] if item["key"] == normalized_group_key), None)
     if not group:
         return None
 
-    sub = next((item for item in group["children"] if item["key"] == sub_key), None)
+    normalized_sub_key = SECTION_KEY_ALIASES.get(sub_key, sub_key)
+    sub = next((item for item in group["children"] if item["key"] == sub_key), None) or next(
+        (item for item in group["children"] if item["key"] == normalized_sub_key),
+        None,
+    )
     if not sub:
         return None
 
@@ -655,17 +1092,35 @@ def build_section_stat_key(page: str, group_key: str, sub_key: str):
     return f"{page}::{group_key}::{sub_key}"
 
 
+def build_article_stat_key(content_id: str, content_slug: str):
+    current_content_id = str(content_id or "").strip()
+    current_content_slug = str(content_slug or "").strip()
+    if current_content_id:
+        return f"id::{current_content_id}"
+    if current_content_slug:
+        return f"slug::{current_content_slug}"
+    return ""
+
+
 def sanitize_tracking_payload(payload: dict):
     return {
         "userId": str(payload.get("userId", "")).strip(),
         "page": str(payload.get("page", "")).strip(),
         "groupKey": str(payload.get("groupKey", "")).strip(),
         "subKey": str(payload.get("subKey", "")).strip(),
+        "action": str(payload.get("action", "")).strip().lower(),
         "contentId": str(payload.get("contentId", "")).strip(),
         "contentSlug": str(payload.get("contentSlug", "")).strip(),
         "contentTitle": str(payload.get("contentTitle", "")).strip(),
         "source": str(payload.get("source", "content-open")).strip(),
     }
+
+
+def resolve_tracking_action(payload: dict):
+    action = str(payload.get("action", "")).strip().lower()
+    if action in {"click", "share"}:
+        return action
+    return "share" if payload.get("source") in {"wechat-share-guide", "share", "forward"} else "click"
 
 
 def fetch_remote_json(path: str, params: dict):
@@ -1080,12 +1535,15 @@ def apply_recharge_order_state(data: dict, order_index: int, query_result: dict)
     return next_order
 
 
-def build_user_state(data: dict, user_id: str):
+def build_user_state(data: dict, user_id: str, viewer_user_id: str = ""):
     safe_user_id = str(user_id or "").strip()
+    safe_viewer_user_id = str(viewer_user_id or "").strip()
     return {
         "userId": safe_user_id,
         "profile": get_user_profile(data, safe_user_id) if safe_user_id else None,
         "vip": build_vip_user_summary(data, safe_user_id, data.get("vipUsers", {}).get(safe_user_id, {})) if safe_user_id else None,
+        "account": build_user_account_summary(data, safe_user_id) if safe_user_id else None,
+        "authenticated": bool(safe_viewer_user_id and safe_viewer_user_id == safe_user_id),
     }
 
 
@@ -1098,11 +1556,14 @@ def record_tracking_event(payload: dict):
     analytics = read_analytics()
     now = datetime.now(tz=timezone.utc).isoformat()
     stat_key = build_section_stat_key(payload["page"], payload["groupKey"], payload["subKey"])
+    action = resolve_tracking_action(payload)
+    article_key = build_article_stat_key(payload["contentId"], payload["contentSlug"])
 
     if payload["userId"] not in analytics["users"]:
         analytics["users"][payload["userId"]] = {
             "userId": payload["userId"],
             "totalClicks": 0,
+            "totalShares": 0,
             "firstSeenAt": now,
             "lastActiveAt": now,
             "sections": {},
@@ -1115,22 +1576,73 @@ def record_tracking_event(payload: dict):
             "groupKey": payload["groupKey"],
             "subKey": payload["subKey"],
             "clickCount": 0,
-            "firstClickedAt": now,
-            "lastClickedAt": now,
+            "shareCount": 0,
+            "firstClickedAt": "",
+            "lastClickedAt": "",
+            "firstSharedAt": "",
+            "lastSharedAt": "",
             "recentContentTitle": payload["contentTitle"],
             "recentContentSlug": payload["contentSlug"],
+            "articles": {},
         }
 
     section = user["sections"][stat_key]
-    user["totalClicks"] += 1
+    user["totalClicks"] = int(user.get("totalClicks", 0) or 0)
+    user["totalShares"] = int(user.get("totalShares", 0) or 0)
     user["lastActiveAt"] = now
-    section["clickCount"] += 1
-    section["lastClickedAt"] = now
+    section["clickCount"] = int(section.get("clickCount", 0) or 0)
+    section["shareCount"] = int(section.get("shareCount", 0) or 0)
+    section["articles"] = section.get("articles", {}) if isinstance(section.get("articles"), dict) else {}
+
+    if action == "share":
+        user["totalShares"] += 1
+        section["shareCount"] += 1
+        if not section.get("firstSharedAt"):
+            section["firstSharedAt"] = now
+        section["lastSharedAt"] = now
+    else:
+        user["totalClicks"] += 1
+        section["clickCount"] += 1
+        if not section.get("firstClickedAt"):
+            section["firstClickedAt"] = now
+        section["lastClickedAt"] = now
 
     if payload["contentTitle"]:
         section["recentContentTitle"] = payload["contentTitle"]
     if payload["contentSlug"]:
         section["recentContentSlug"] = payload["contentSlug"]
+
+    if article_key:
+        if article_key not in section["articles"]:
+            section["articles"][article_key] = {
+                "contentId": payload["contentId"],
+                "contentSlug": payload["contentSlug"],
+                "contentTitle": payload["contentTitle"],
+                "clickCount": 0,
+                "shareCount": 0,
+                "firstClickedAt": "",
+                "lastClickedAt": "",
+                "firstSharedAt": "",
+                "lastSharedAt": "",
+            }
+
+        article = section["articles"][article_key]
+        article["contentId"] = payload["contentId"] or str(article.get("contentId", "")).strip()
+        article["contentSlug"] = payload["contentSlug"] or str(article.get("contentSlug", "")).strip()
+        article["contentTitle"] = payload["contentTitle"] or str(article.get("contentTitle", "")).strip()
+        article["clickCount"] = int(article.get("clickCount", 0) or 0)
+        article["shareCount"] = int(article.get("shareCount", 0) or 0)
+
+        if action == "share":
+            article["shareCount"] += 1
+            if not article.get("firstSharedAt"):
+                article["firstSharedAt"] = now
+            article["lastSharedAt"] = now
+        else:
+            article["clickCount"] += 1
+            if not article.get("firstClickedAt"):
+                article["firstClickedAt"] = now
+            article["lastClickedAt"] = now
 
     analytics["events"].insert(
         0,
@@ -1140,6 +1652,7 @@ def record_tracking_event(payload: dict):
             "page": payload["page"],
             "groupKey": payload["groupKey"],
             "subKey": payload["subKey"],
+            "action": action,
             "contentId": payload["contentId"],
             "contentSlug": payload["contentSlug"],
             "contentTitle": payload["contentTitle"],
@@ -1158,26 +1671,89 @@ def build_analytics_response(selected_user_id: str = ""):
     analytics = read_analytics()
 
     users = []
-    for user in analytics["users"].values():
+    for user in analytics.get("users", {}).values():
+        user_total_clicks = int(user.get("totalClicks", 0) or 0)
+        user_total_shares = int(user.get("totalShares", 0) or 0)
         section_stats = []
         for item in user.get("sections", {}).values():
             meta = resolve_meta(data, item["page"], item["groupKey"], item["subKey"]) or {}
-            percentage = round((item["clickCount"] / user["totalClicks"]) * 100, 2) if user["totalClicks"] else 0
-            section_stats.append({**item, **meta, "percentage": percentage})
+            click_count = int(item.get("clickCount", 0) or 0)
+            share_count = int(item.get("shareCount", 0) or 0)
+            article_stats = []
 
-        section_stats.sort(key=lambda current: current["clickCount"], reverse=True)
+            for article in (item.get("articles", {}) or {}).values():
+                article_click_count = int(article.get("clickCount", 0) or 0)
+                article_share_count = int(article.get("shareCount", 0) or 0)
+                article_stats.append(
+                    {
+                        **article,
+                        "clickCount": article_click_count,
+                        "shareCount": article_share_count,
+                        "clickPercentage": round((article_click_count / click_count) * 100, 2) if click_count else 0,
+                        "sharePercentage": round((article_share_count / share_count) * 100, 2) if share_count else 0,
+                        "overallClickPercentage": round((article_click_count / user_total_clicks) * 100, 2)
+                        if user_total_clicks
+                        else 0,
+                        "overallSharePercentage": round((article_share_count / user_total_shares) * 100, 2)
+                        if user_total_shares
+                        else 0,
+                    }
+                )
+
+            article_stats.sort(
+                key=lambda current: (
+                    -(int(current.get("clickCount", 0) or 0) + int(current.get("shareCount", 0) or 0)),
+                    str(current.get("lastClickedAt") or current.get("lastSharedAt") or ""),
+                ),
+                reverse=False,
+            )
+            article_stats.sort(
+                key=lambda current: (
+                    int(current.get("clickCount", 0) or 0) + int(current.get("shareCount", 0) or 0),
+                    str(current.get("lastClickedAt") or current.get("lastSharedAt") or ""),
+                ),
+                reverse=True,
+            )
+
+            section_stats.append(
+                {
+                    **item,
+                    **meta,
+                    "clickCount": click_count,
+                    "shareCount": share_count,
+                    "clickPercentage": round((click_count / user_total_clicks) * 100, 2) if user_total_clicks else 0,
+                    "sharePercentage": round((share_count / user_total_shares) * 100, 2) if user_total_shares else 0,
+                    "articleStats": article_stats,
+                }
+            )
+
+        section_stats.sort(
+            key=lambda current: (
+                int(current.get("clickCount", 0) or 0) + int(current.get("shareCount", 0) or 0),
+                int(current.get("clickCount", 0) or 0),
+            ),
+            reverse=True,
+        )
         users.append(
             {
                 "userId": user["userId"],
-                "totalClicks": user["totalClicks"],
-                "firstSeenAt": user["firstSeenAt"],
-                "lastActiveAt": user["lastActiveAt"],
+                "profile": get_user_profile(data, user["userId"]),
+                "totalClicks": user_total_clicks,
+                "totalShares": user_total_shares,
+                "firstSeenAt": user.get("firstSeenAt", ""),
+                "lastActiveAt": user.get("lastActiveAt", ""),
                 "topSection": section_stats[0] if section_stats else None,
                 "sectionStats": section_stats,
             }
         )
 
-    users.sort(key=lambda current: current["totalClicks"], reverse=True)
+    users.sort(
+        key=lambda current: (
+            current["totalClicks"] + current["totalShares"],
+            current["totalClicks"],
+        ),
+        reverse=True,
+    )
 
     subsection_map = {}
     for user in users:
@@ -1192,20 +1768,36 @@ def build_analytics_response(selected_user_id: str = ""):
                     "groupLabel": item.get("groupLabel", ""),
                     "subLabel": item.get("subLabel", ""),
                     "totalClicks": 0,
+                    "totalShares": 0,
                     "userCount": 0,
                 }
             subsection_map[stat_key]["totalClicks"] += item["clickCount"]
+            subsection_map[stat_key]["totalShares"] += item["shareCount"]
             subsection_map[stat_key]["userCount"] += 1
 
-    subsection_stats = sorted(subsection_map.values(), key=lambda current: current["totalClicks"], reverse=True)
+    total_clicks = sum(int(item["totalClicks"]) for item in users)
+    total_shares = sum(int(item["totalShares"]) for item in users)
+    subsection_stats = sorted(
+        [
+            {
+                **item,
+                "clickPercentage": round((item["totalClicks"] / total_clicks) * 100, 2) if total_clicks else 0,
+                "sharePercentage": round((item["totalShares"] / total_shares) * 100, 2) if total_shares else 0,
+            }
+            for item in subsection_map.values()
+        ],
+        key=lambda current: (current["totalClicks"] + current["totalShares"], current["totalClicks"]),
+        reverse=True,
+    )
     selected_user = next((item for item in users if item["userId"] == selected_user_id), None) if selected_user_id else None
 
     return {
         "overview": {
             "totalUsers": len(users),
-            "totalClicks": sum(item["totalClicks"] for item in users),
+            "totalClicks": total_clicks,
+            "totalShares": total_shares,
             "subsectionStats": subsection_stats,
-            "recentEvents": analytics["events"][:30],
+            "recentEvents": analytics.get("events", [])[:30],
         },
         "users": users,
         "selectedUser": selected_user,
@@ -1220,6 +1812,22 @@ def json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict, i
     handler.end_headers()
     if include_body:
         handler.wfile.write(body)
+
+
+def json_response_with_headers(
+    handler: BaseHTTPRequestHandler,
+    status: int,
+    payload: dict,
+    headers: list[tuple[str, str]] | None = None,
+):
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    for key, value in headers or []:
+        handler.send_header(key, value)
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
 
 
 def send_file(handler: BaseHTTPRequestHandler, file_path: Path, include_body: bool = True):
@@ -1533,10 +2141,10 @@ def build_upload_filename(original_name: str, content_type: str):
     safe_name = re.sub(r"[^a-zA-Z0-9._-]", "-", str(original_name or "").strip())
     suffix = Path(safe_name).suffix.lower()
     guessed_suffix = mimetypes.guess_extension(str(content_type or "").strip()) or ""
-    allowed_suffixes = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+    allowed_suffixes = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif"}
 
     if suffix not in allowed_suffixes:
-      suffix = guessed_suffix if guessed_suffix in allowed_suffixes else ".jpg"
+        suffix = guessed_suffix if guessed_suffix in allowed_suffixes else ".jpg"
 
     return f"{int(time.time() * 1000)}-{secrets.token_hex(6)}{suffix}"
 
@@ -1552,8 +2160,16 @@ def save_uploaded_image(payload: dict):
     if not content_type.startswith("image/"):
         raise ValueError("only image uploads are supported")
 
+    if raw_data.startswith("data:") and "," in raw_data:
+        raw_data = raw_data.split(",", 1)[1]
+
+    normalized_data = re.sub(r"\s+", "", raw_data)
+    padding = len(normalized_data) % 4
+    if padding:
+        normalized_data = f"{normalized_data}{'=' * (4 - padding)}"
+
     try:
-        binary = base64.b64decode(raw_data, validate=True)
+        binary = base64.b64decode(normalized_data, validate=False)
     except Exception as error:
         raise ValueError("invalid image data") from error
 
@@ -1928,7 +2544,23 @@ class AppHandler(BaseHTTPRequestHandler):
             if not user_id:
                 return respond_json(400, {"message": "userId required"})
             data = read_data()
-            return respond_json(200, build_user_state(data, user_id))
+            viewer_user_id = get_authenticated_user_id(data, self)
+            write_data(data)
+            return respond_json(200, build_user_state(data, user_id, viewer_user_id))
+
+        if route == "/api/users/session":
+            data = read_data()
+            user_id = get_authenticated_user_id(data, self)
+            write_data(data)
+            return respond_json(
+                200,
+                {
+                    "authenticated": bool(user_id),
+                    "userId": user_id,
+                    "profile": get_user_profile(data, user_id) if user_id else None,
+                    "account": build_user_account_summary(data, user_id) if user_id else None,
+                },
+            )
 
         if route.startswith("/api/users/profile/"):
             user_id = route.replace("/api/users/profile/", "", 1).strip()
@@ -1941,6 +2573,10 @@ class AppHandler(BaseHTTPRequestHandler):
                 return respond_json(404, {"message": "user profile not found"})
 
             return respond_json(200, {"profile": profile})
+
+        if route == "/api/users/accounts":
+            data = read_data()
+            return respond_json(200, {"accounts": get_all_user_account_archives(data)})
 
         if route == "/api/users/vip":
             return respond_json(200, {"users": get_all_vip_user_summaries()})
@@ -1968,12 +2604,17 @@ class AppHandler(BaseHTTPRequestHandler):
             page = str(query.get("page", [""])[0]).strip()
             group_key = str(query.get("groupKey", [""])[0]).strip()
             sub_key = str(query.get("subKey", [""])[0]).strip()
+            normalized_group_key = normalize_content_group_key(page, group_key, sub_key)
 
             contents = data["contents"]
             if page:
                 contents = [item for item in contents if item["page"] == page]
-            if group_key:
-                contents = [item for item in contents if item["groupKey"] == group_key]
+            if normalized_group_key:
+                contents = [
+                    item
+                    for item in contents
+                    if normalize_content_group_key(item.get("page", ""), item.get("groupKey", ""), item.get("subKey", "")) == normalized_group_key
+                ]
             if sub_key:
                 contents = [item for item in contents if item["subKey"] == sub_key]
 
@@ -2042,12 +2683,17 @@ class AppHandler(BaseHTTPRequestHandler):
                 return respond_json(500, {"message": "wechat signature failed"})
 
         if route == "/api/wechat/oauth/session":
+            open_id = get_wechat_openid_from_request(self)
+            suffix = open_id[-8:].lower() if open_id else ""
             return respond_json(
                 200,
                 {
                     "configured": bool(WECHAT_APP_ID and WECHAT_APP_SECRET),
                     "inWechat": is_wechat_browser_request(self),
-                    "hasOpenId": bool(get_wechat_openid_from_request(self)),
+                    "hasOpenId": bool(open_id),
+                    "suggestedUserId": f"wx-{suffix}" if suffix else "",
+                    "suggestedName": f"微信用户{suffix[-4:]}" if suffix else "",
+                    "suggestedWechat": "",
                 },
             )
 
@@ -2153,6 +2799,21 @@ class AppHandler(BaseHTTPRequestHandler):
             user_id = str(query.get("userId", [""])[0]).strip()
             return respond_json(200, build_analytics_response(user_id))
 
+        if route == "/api/admin/session":
+            data = read_data()
+            admin = get_admin_auth_state(data, self)
+            write_data(data)
+            return respond_json(
+                200,
+                {
+                    "authenticated": admin["authenticated"],
+                    "username": admin["username"],
+                    "viaTrustedIp": admin["viaTrustedIp"],
+                    "ip": admin["ip"],
+                    "configured": admin["configured"],
+                },
+            )
+
         if route.startswith("/content/"):
             slug = route.replace("/content/", "", 1).strip()
             data = read_data()
@@ -2183,12 +2844,16 @@ class AppHandler(BaseHTTPRequestHandler):
             return respond_file(PUBLIC_DIR / "index.html")
 
         safe_path = route.lstrip("/") or "index.html"
+        blocked_public_paths = {"backend-test.html", "frontend-test.html"}
+        if safe_path in blocked_public_paths:
+            return self.send_error(404, "Not Found")
         target = (PUBLIC_DIR / safe_path).resolve()
         if PUBLIC_DIR.resolve() not in target.parents and target != PUBLIC_DIR.resolve():
             return self.send_error(403, "Forbidden")
         return respond_file(target)
 
     def do_POST(self):
+        global ADMIN_PASSWORD
         parsed = urlparse(self.path)
         payload = parse_json_body(self)
         if payload is None:
@@ -2218,6 +2883,151 @@ class AppHandler(BaseHTTPRequestHandler):
             write_share_debug(debug_data)
             return json_response(self, 201, {"message": "recorded"})
 
+        if parsed.path == "/api/admin/login":
+            data = read_data()
+            trusted_admin = get_admin_auth_state(data, self)
+            if trusted_admin["viaTrustedIp"]:
+                write_data(data)
+                return json_response(
+                    self,
+                    200,
+                    {
+                        "message": "trusted ip access granted",
+                        "authenticated": True,
+                        "username": trusted_admin["username"],
+                        "viaTrustedIp": True,
+                        "ip": trusted_admin["ip"],
+                        "configured": trusted_admin["configured"],
+                    },
+                )
+
+            if not is_admin_auth_configured():
+                write_data(data)
+                return json_response(self, 503, {"message": "admin auth not configured", "configured": False})
+
+            username = str(payload.get("username", "")).strip()
+            password = str(payload.get("password", "")).strip()
+            if not username or not password:
+                write_data(data)
+                return json_response(self, 400, {"message": "username/password required"})
+
+            if username != ADMIN_USERNAME or password != ADMIN_PASSWORD:
+                write_data(data)
+                return json_response(self, 401, {"message": "invalid admin credentials"})
+
+            token = create_admin_session(data, username)
+            write_data(data)
+            return json_response_with_headers(
+                self,
+                200,
+                {
+                    "message": "admin login success",
+                    "authenticated": True,
+                    "username": username,
+                    "viaTrustedIp": False,
+                    "ip": get_request_ip(self),
+                    "configured": True,
+                },
+                headers=[("Set-Cookie", build_cookie_header(ADMIN_SESSION_COOKIE, token, max_age=ADMIN_SESSION_TTL_SECONDS))],
+            )
+
+        if parsed.path == "/api/admin/logout":
+            data = read_data()
+            revoke_admin_session(data, get_admin_session_token_from_request(self))
+            write_data(data)
+            return json_response_with_headers(
+                self,
+                200,
+                {"message": "admin logout success", "authenticated": False},
+                headers=[("Set-Cookie", build_cookie_header(ADMIN_SESSION_COOKIE, "", max_age=0))],
+            )
+
+        if parsed.path == "/api/admin/password/change":
+            data = read_data()
+            admin = get_admin_auth_state(data, self)
+            if not admin.get("authenticated"):
+                write_data(data)
+                return json_response(self, 401, {"message": "admin login required"})
+
+            if not is_admin_auth_configured():
+                write_data(data)
+                return json_response(self, 503, {"message": "admin auth not configured", "configured": False})
+
+            current_password = str(payload.get("currentPassword", "")).strip()
+            new_password = str(payload.get("newPassword", "")).strip()
+            confirm_password = str(payload.get("confirmPassword", "")).strip()
+
+            if not current_password or not new_password or not confirm_password:
+                write_data(data)
+                return json_response(self, 400, {"message": "currentPassword/newPassword/confirmPassword required"})
+            if current_password != ADMIN_PASSWORD:
+                write_data(data)
+                return json_response(self, 401, {"message": "current password incorrect"})
+            if len(new_password) < 6:
+                write_data(data)
+                return json_response(self, 400, {"message": "new password must be at least 6 characters"})
+            if new_password != confirm_password:
+                write_data(data)
+                return json_response(self, 400, {"message": "password confirmation mismatch"})
+
+            ADMIN_PASSWORD = new_password
+            update_env_value("ADMIN_PASSWORD", new_password)
+            write_data(data)
+            return json_response(
+                self,
+                200,
+                {
+                    "message": "admin password updated",
+                    "username": admin.get("username") or ADMIN_USERNAME or "admin",
+                },
+            )
+
+        if parsed.path == "/api/users/login":
+            user_id = str(payload.get("userId", "")).strip()
+            password = str(payload.get("password", "")).strip()
+            if not user_id or not password:
+                return json_response(self, 400, {"message": "userId/password required"})
+
+            data = read_data()
+            account = get_user_account(data, user_id)
+            if not account or not account.get("passwordHash"):
+                return json_response(self, 404, {"message": "account password not set"})
+            if not verify_account_password(account, password):
+                return json_response(self, 401, {"message": "invalid password"})
+
+            token = create_auth_session(data, user_id)
+            account["lastLoginAt"] = datetime.now(tz=timezone.utc).isoformat()
+            account["updatedAt"] = account["lastLoginAt"]
+            data.setdefault("userAccounts", {})[user_id] = account
+            write_data(data)
+            return json_response_with_headers(
+                self,
+                200,
+                {
+                    "message": "login success",
+                    "userId": user_id,
+                    "profile": get_user_profile(data, user_id),
+                    "account": build_user_account_summary(data, user_id),
+                },
+                headers=[
+                    (
+                        "Set-Cookie",
+                        f"{AUTH_SESSION_COOKIE}={token}; Max-Age={AUTH_SESSION_TTL_SECONDS}; Path=/; HttpOnly; SameSite=Lax",
+                    )
+                ],
+            )
+
+        if parsed.path == "/api/users/logout":
+            data = read_data()
+            revoke_auth_session(data, get_auth_session_token_from_request(self))
+            write_data(data)
+            return json_response_with_headers(
+                self,
+                200,
+                {"message": "logout success"},
+                headers=[("Set-Cookie", f"{AUTH_SESSION_COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax")],
+            )
+
         if parsed.path == "/api/users/register":
             profile_payload = sanitize_user_profile_payload(payload)
             validation_message = validate_user_profile_payload(profile_payload)
@@ -2226,6 +3036,10 @@ class AppHandler(BaseHTTPRequestHandler):
 
             data = read_data()
             analytics = read_analytics()
+            locked_user_id = profile_payload["previousUserId"] if get_user_profile(data, profile_payload["previousUserId"]) else ""
+            if locked_user_id and profile_payload["userId"] != locked_user_id:
+                return json_response(self, 400, {"message": "registered userId cannot be changed"})
+
             if is_reserved_user_id(data, analytics, profile_payload["previousUserId"], profile_payload["userId"]):
                 return json_response(self, 409, {"message": "userId already exists"})
 
@@ -2245,10 +3059,159 @@ class AppHandler(BaseHTTPRequestHandler):
             )
 
             data.setdefault("userProfiles", {})[profile_payload["userId"]] = profile
+            account = upsert_user_account(
+                data,
+                profile_payload["userId"],
+                recovery_phone=profile_payload["recoveryPhone"] or profile_payload["phone"],
+            )
+            if profile_payload["password"]:
+                account = set_account_password(
+                    account,
+                    profile_payload["password"],
+                    recovery_phone=profile_payload["recoveryPhone"] or profile_payload["phone"],
+                )
+            data.setdefault("userAccounts", {})[profile_payload["userId"]] = account
             write_data(data)
             write_analytics(analytics)
 
-            return json_response(self, 201, {"message": "user registered", "profile": profile})
+            token = create_auth_session(data, profile_payload["userId"])
+            write_data(data)
+            return json_response_with_headers(
+                self,
+                201,
+                {
+                    "message": "user registered",
+                    "profile": profile,
+                    "account": build_user_account_summary(data, profile_payload["userId"]),
+                },
+                headers=[
+                    (
+                        "Set-Cookie",
+                        f"{AUTH_SESSION_COOKIE}={token}; Max-Age={AUTH_SESSION_TTL_SECONDS}; Path=/; HttpOnly; SameSite=Lax",
+                    )
+                ],
+            )
+
+        if parsed.path == "/api/users/password/set":
+            data = read_data()
+            auth_user_id = get_authenticated_user_id(data, self)
+            target_user_id = str(payload.get("userId", "")).strip() or auth_user_id
+            password = str(payload.get("password", "")).strip()
+            confirm_password = str(payload.get("confirmPassword", "")).strip()
+            recovery_phone = str(payload.get("recoveryPhone", "")).strip()
+            if not auth_user_id or auth_user_id != target_user_id:
+                return json_response(self, 401, {"message": "login required"})
+            if not password or len(password) < 6:
+                return json_response(self, 400, {"message": "password must be at least 6 characters"})
+            if password != confirm_password:
+                return json_response(self, 400, {"message": "password confirmation mismatch"})
+
+            account = upsert_user_account(data, target_user_id, recovery_phone=recovery_phone)
+            account = set_account_password(account, password, recovery_phone=recovery_phone)
+            data.setdefault("userAccounts", {})[target_user_id] = account
+            write_data(data)
+            return json_response(
+                self,
+                200,
+                {"message": "password set", "account": build_user_account_summary(data, target_user_id)},
+            )
+
+        if parsed.path == "/api/users/password/change":
+            data = read_data()
+            auth_user_id = get_authenticated_user_id(data, self)
+            if not auth_user_id:
+                return json_response(self, 401, {"message": "login required"})
+
+            old_password = str(payload.get("oldPassword", "")).strip()
+            new_password = str(payload.get("newPassword", "")).strip()
+            confirm_password = str(payload.get("confirmPassword", "")).strip()
+            if not old_password or not new_password:
+                return json_response(self, 400, {"message": "oldPassword/newPassword required"})
+            if len(new_password) < 6:
+                return json_response(self, 400, {"message": "password must be at least 6 characters"})
+            if new_password != confirm_password:
+                return json_response(self, 400, {"message": "password confirmation mismatch"})
+
+            account = get_user_account(data, auth_user_id)
+            if not account or not verify_account_password(account, old_password):
+                return json_response(self, 401, {"message": "old password incorrect"})
+
+            account = set_account_password(account, new_password, recovery_phone=account.get("recoveryPhone", ""))
+            data.setdefault("userAccounts", {})[auth_user_id] = account
+            write_data(data)
+            return json_response(
+                self,
+                200,
+                {"message": "password changed", "account": build_user_account_summary(data, auth_user_id)},
+            )
+
+        if parsed.path == "/api/users/password/forgot":
+            user_id = str(payload.get("userId", "")).strip()
+            phone = str(payload.get("phone", "")).strip()
+            code = str(payload.get("code", "")).strip()
+            new_password = str(payload.get("newPassword", "")).strip()
+            confirm_password = str(payload.get("confirmPassword", "")).strip()
+            if not user_id or not phone:
+                return json_response(self, 400, {"message": "userId/phone required"})
+            if not code or not new_password or not confirm_password:
+                return json_response(self, 400, {"message": "code/newPassword/confirmPassword required"})
+
+            data = read_data()
+            account = upsert_user_account(data, user_id, recovery_phone=phone)
+            account["forgotPasswordRequestedAt"] = datetime.now(tz=timezone.utc).isoformat()
+            account["updatedAt"] = account["forgotPasswordRequestedAt"]
+            data.setdefault("userAccounts", {})[user_id] = account
+            write_data(data)
+            return json_response(
+                self,
+                501,
+                {
+                    "message": "forgot password verification not enabled yet",
+                    "supported": False,
+                },
+            )
+
+        if parsed.path == "/api/users/password/admin-set":
+            user_id = str(payload.get("userId", "")).strip()
+            password = str(payload.get("password", "")).strip()
+            confirm_password = str(payload.get("confirmPassword", "")).strip()
+            recovery_phone = str(payload.get("recoveryPhone", "")).strip()
+            if not user_id:
+                return json_response(self, 400, {"message": "userId required"})
+            if not password or len(password) < 6:
+                return json_response(self, 400, {"message": "password must be at least 6 characters"})
+            if password != confirm_password:
+                return json_response(self, 400, {"message": "password confirmation mismatch"})
+
+            data = read_data()
+            analytics = read_analytics()
+            user_exists = bool(
+                data.get("userProfiles", {}).get(user_id)
+                or data.get("userAccounts", {}).get(user_id)
+                or data.get("vipUsers", {}).get(user_id)
+                or analytics.get("users", {}).get(user_id)
+            )
+            if not user_exists:
+                return json_response(self, 404, {"message": "user not found"})
+
+            profile = get_user_profile(data, user_id) or {}
+            account = upsert_user_account(
+                data,
+                user_id,
+                recovery_phone=recovery_phone or str(profile.get("phone", "")).strip(),
+            )
+            account = set_account_password(
+                account,
+                password,
+                recovery_phone=recovery_phone or str(profile.get("phone", "")).strip(),
+            )
+            data.setdefault("userAccounts", {})[user_id] = account
+            write_data(data)
+            return json_response(
+                self,
+                200,
+                {"message": "password updated", "account": build_user_account_summary(data, user_id)},
+            )
 
         if parsed.path == "/api/content":
             item = sanitize_content_payload(payload)

@@ -82,12 +82,19 @@ async function fetchDirectUserProfile() {
 
 function buildCardProfile(content, userProfile) {
   const profile = userProfile && typeof userProfile === "object" ? userProfile : null;
-  if (!profile?.userId) {
+  const hasProfileContent = Boolean(
+    profile &&
+      [profile.userId, profile.name, profile.avatarUrl, profile.phone, profile.wechat, profile.introduction, profile.title]
+        .map((item) => String(item || "").trim())
+        .some(Boolean)
+  );
+
+  if (!hasProfileContent) {
     return null;
   }
 
   return {
-    name: String(profile.name || profile.userId || "").trim(),
+    name: String(profile.name || profile.userId || "").trim() || "咨询顾问",
     role: String(profile.title || "").trim() || "注册用户",
     description:
       String(profile.introduction || "").trim() ||
@@ -106,7 +113,21 @@ function getInitials(name) {
 function renderContactCard(content, userProfile) {
   const profile = buildCardProfile(content, userProfile);
   if (!profile) {
-    return "";
+    return `
+      <section class="detail-contact-card detail-contact-card--empty share-contact-card">
+        <div class="detail-contact-card__content">
+          <div class="detail-contact-card__headline">
+            <h2>尚未生成个人名片</h2>
+          </div>
+          <p class="detail-contact-card__desc">
+            系统会自动读取当前注册用户自己填写的头像、姓名、电话、微信和个人介绍来生成这张名片。
+          </p>
+          <div class="chip-row" style="margin-top:16px">
+            <button type="button" class="chip chip--primary" data-open-registration="true">立即完善资料</button>
+          </div>
+        </div>
+      </section>
+    `;
   }
 
   const avatar = profile.avatarUrl
@@ -214,6 +235,24 @@ function bindShareActions(content) {
         window.ShareHelper?.showToast?.(`微信号已复制：${wechat}`);
       } catch (error) {
         window.alert(`微信号：${wechat}`);
+      }
+    });
+  }
+
+  const registrationButton = document.querySelector("[data-open-registration]");
+  if (registrationButton) {
+    registrationButton.addEventListener("click", async () => {
+      try {
+        await window.AnalyticsTracker?.ensureUserRegistration?.();
+        if (!window.AnalyticsTracker?.getProfile?.()) {
+          window.AnalyticsTracker?.showRegistrationModal?.({
+            userId: window.AnalyticsTracker?.getUserId?.() || ""
+          });
+        }
+      } catch (error) {
+        window.AnalyticsTracker?.showRegistrationModal?.({
+          userId: window.AnalyticsTracker?.getUserId?.() || ""
+        });
       }
     });
   }

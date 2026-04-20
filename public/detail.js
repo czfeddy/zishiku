@@ -20,14 +20,38 @@ function formatDateTime(value) {
   return escapeHtml(date.toLocaleString("zh-CN"));
 }
 
+function parseMomentsBody(body) {
+  const raw = String(body || "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.schema === "moments-post-v1" && typeof parsed.text === "string" && Array.isArray(parsed.images)) {
+      return {
+        text: parsed.text,
+        images: parsed.images
+          .map((item) => ({
+            url: String(item?.url || "").trim(),
+            name: String(item?.name || "").trim()
+          }))
+          .filter((item) => item.url)
+      };
+    }
+  } catch (error) {
+    return null;
+  }
+
+  return null;
+}
+
 function getPageLink(page) {
   switch (String(page || "").trim()) {
     case "recharge":
       return "/recharge.html";
     case "achievements":
       return "/achievements.html";
-    case "notes":
-      return "/notes.html";
     case "home":
     default:
       return "/";
@@ -108,75 +132,13 @@ function getMiniProgramLaunchUrl(content) {
   return String(content?.miniProgramLaunchUrl || "").trim();
 }
 
-function renderMiniProgramBridge(content) {
-  const miniProgram = buildMiniProgramMeta(content);
-  if (!miniProgram) {
-    return "";
-  }
-
-  const metaRows = [];
-  if (miniProgram.miniProgramName) {
-    metaRows.push(`<p><strong>小程序：</strong>${escapeHtml(miniProgram.miniProgramName)}</p>`);
-  }
-  if (miniProgram.miniProgramAppId) {
-    metaRows.push(`<p><strong>AppID：</strong>${escapeHtml(miniProgram.miniProgramAppId)}</p>`);
-  }
-  if (miniProgram.miniProgramOriginalId) {
-    metaRows.push(`<p><strong>原始ID：</strong>${escapeHtml(miniProgram.miniProgramOriginalId)}</p>`);
-  }
-  if (miniProgram.miniProgramPath) {
-    metaRows.push(`<p><strong>页面路径：</strong>${escapeHtml(miniProgram.miniProgramPath)}</p>`);
-  }
-
-  const launchTag = miniProgram.miniProgramOriginalId && miniProgram.miniProgramPath
-    ? `
-      <wx-open-launch-weapp
-        id="open-mini-program-tag"
-        username="${escapeHtml(miniProgram.miniProgramOriginalId)}"
-        path="${escapeHtml(miniProgram.miniProgramPath)}"
-      >
-        <template>
-          <button type="button" class="chip chip--primary detail-mini-program-launch-button">直接打开小程序分享版</button>
-        </template>
-      </wx-open-launch-weapp>
-    `
-    : "";
-
-  return `
-    <section class="detail-mini-program-card">
-      <p class="detail-mini-program-card__eyebrow">朋友圈小程序卡片测试</p>
-      <h2 class="detail-mini-program-card__title">这篇内容已经映射到现有小程序分享壳</h2>
-      <p class="detail-mini-program-card__desc">
-        ${escapeHtml(
-          miniProgram.miniProgramNote ||
-            "建议先在现有小程序里打开这篇内容的分享壳页面，再从小程序右上角分享到朋友圈进行真机验证。"
-        )}
-      </p>
-      <div class="detail-mini-program-card__meta">${metaRows.join("")}</div>
-      <div class="chip-row detail-mini-program-card__actions">
-        ${launchTag}
-        ${
-          miniProgram.miniProgramLaunchUrl
-            ? `<button type="button" class="chip chip--primary" id="open-mini-program-btn" data-mini-program-launch-url="${escapeHtml(miniProgram.miniProgramLaunchUrl)}">打开小程序分享版</button>`
-            : ""
-        }
-        ${
-          miniProgram.miniProgramPath
-            ? `<button type="button" class="chip" id="copy-mini-program-path-btn" data-mini-program-path="${escapeHtml(miniProgram.miniProgramPath)}">复制小程序路径</button>`
-            : ""
-        }
-      </div>
-    </section>
-  `;
-}
-
 function renderBreadcrumb(content) {
-  const pageLabel = escapeHtml(content.pageLabel || "首页");
-  const groupLabel = escapeHtml(content.groupLabel || "类目");
-  const subLabel = escapeHtml(content.subLabel || "子类目");
+  const pageLabel = escapeHtml(content.pageLabel || "Home");
+  const groupLabel = escapeHtml(content.groupLabel || "Category");
+  const subLabel = escapeHtml(content.subLabel || "Subcategory");
 
   return `
-    <nav class="breadcrumb" aria-label="面包屑导航">
+    <nav class="breadcrumb" aria-label="闂傚倸鐗勯崹鍦偓鍨焽娴狅箓骞嬪┑鎰闂?>
       <a class="breadcrumb__link" href="${escapeHtml(getPageLink(content.page))}">${pageLabel}</a>
       <span class="breadcrumb__sep">/</span>
       <a class="breadcrumb__link" href="${escapeHtml(getGroupLink(content))}">${groupLabel}</a>
@@ -222,7 +184,7 @@ async function fetchDirectUserProfile() {
 
   const result = await response.json();
   if (!response.ok) {
-    throw new Error(result.message || "加载用户资料失败");
+    throw new Error(result.message || "闂佸憡姊绘慨鎯归崶顒佸仺闁靛绠戦悡鏇㈡偣瑜嶇€氼參寮搁埄鍐ㄧ窞閺夊牜鍋夎");
   }
 
   return result.profile || null;
@@ -230,12 +192,19 @@ async function fetchDirectUserProfile() {
 
 function buildCardProfile(content, userProfile) {
   const profile = userProfile && typeof userProfile === "object" ? userProfile : null;
-  if (!profile?.userId) {
+  const hasProfileContent = Boolean(
+    profile &&
+      [profile.userId, profile.name, profile.avatarUrl, profile.phone, profile.wechat, profile.introduction, profile.title]
+        .map((item) => String(item || "").trim())
+        .some(Boolean)
+  );
+
+  if (!hasProfileContent) {
     return null;
   }
 
   return {
-    name: String(profile.name || profile.userId || "").trim(),
+    name: String(profile.name || profile.userId || "").trim() || "\u54a8\u8be2\u987e\u95ee",
     role: String(profile.title || "").trim() || "\u6ce8\u518c\u7528\u6237",
     description:
       String(profile.introduction || "").trim() ||
@@ -263,6 +232,9 @@ function renderContactCard(content, userProfile) {
           <p class="detail-contact-card__desc">
             \u7cfb\u7edf\u4f1a\u81ea\u52a8\u8bfb\u53d6\u5f53\u524d\u6ce8\u518c\u7528\u6237\u81ea\u5df1\u586b\u5199\u7684\u5934\u50cf\u3001\u59d3\u540d\u3001\u7535\u8bdd\u3001\u5fae\u4fe1\u548c\u4e2a\u4eba\u4ecb\u7ecd\u6765\u751f\u6210\u8fd9\u5f20\u540d\u7247\u3002
           </p>
+          <div class="chip-row" style="margin-top:16px">
+            <button type="button" class="chip chip--primary" data-open-registration="true">\u7acb\u5373\u5b8c\u5584\u8d44\u6599</button>
+          </div>
         </div>
       </section>
     `;
@@ -312,12 +284,23 @@ function renderContactCard(content, userProfile) {
 
 function renderDetail(content, userProfile) {
   const summary = content.summary ? `<p>${escapeHtml(content.summary)}</p>` : "";
+  const momentsBody = parseMomentsBody(content.body);
   const externalLink = content.externalUrl
     ? `<a class="chip" href="${escapeHtml(content.externalUrl)}" target="_blank" rel="noreferrer">\u6253\u5f00\u5916\u90e8\u94fe\u63a5</a>`
     : "";
   const shareLabel = getMiniProgramLaunchUrl(content)
-    ? "\u6253\u5f00\u5c0f\u7a0b\u5e8f\u5206\u4eab\u7248"
+    ? momentsBody
+      ? "\u6253\u5f00\u5c0f\u7a0b\u5e8f\u4e00\u952e\u5907\u597d\u670b\u53cb\u5708\u7d20\u6750"
+      : "\u53bb\u670b\u53cb\u5708\u5206\u4eab"
     : "\u67e5\u770b\u5c0f\u7a0b\u5e8f\u6253\u5f00\u65b9\u5f0f";
+  const momentsHelperNotice = momentsBody
+    ? `
+      <div class="detail-share-helper-note">
+        <strong>\u53d1\u670b\u53cb\u5708\u65b9\u5f0f\uff1a</strong>
+        \u6253\u5f00\u5c0f\u7a0b\u5e8f\u7d20\u6750\u52a9\u624b\u540e\uff0c\u7cfb\u7edf\u4f1a\u590d\u5236\u6587\u6848\u5e76\u4fdd\u5b58\u56fe\u7247\u5230\u76f8\u518c\u3002\u8bf7\u56de\u5230\u5fae\u4fe1\u670b\u53cb\u5708\u624b\u52a8\u53d1\u5e03\uff0c\u4e0d\u8981\u7528\u53f3\u4e0a\u89d2\u5206\u4eab\uff0c\u90a3\u4f1a\u53d8\u6210\u94fe\u63a5\u5361\u7247\u3002
+      </div>
+    `
+    : "";
 
   return `
     <section class="detail-card">
@@ -326,8 +309,30 @@ function renderDetail(content, userProfile) {
       ${renderContactCard(content, userProfile)}
       <p class="detail-meta">\u53d1\u5e03\u65f6\u95f4\uff1a${formatDateTime(content.createdAt)}</p>
       ${summary}
-      <div class="detail-body">${escapeHtml(content.body || "\u5f53\u524d\u4ec5\u914d\u7f6e\u4e86\u6458\u8981\u5185\u5bb9\u3002")}</div>
-      ${renderMiniProgramBridge(content)}
+      ${momentsHelperNotice}
+      <div class="detail-body">${
+        momentsBody
+          ? `
+            <div class="moments-rich-body">
+              <p>${escapeHtml(momentsBody.text || "")}</p>
+              ${
+                momentsBody.images.length
+                  ? `
+                    <div class="moments-rich-gallery">
+                      ${momentsBody.images
+                        .map(
+                          (image) =>
+                            `<img src="${escapeHtml(image.url)}" alt="${escapeHtml(image.name || content.title || "朋友圈配图")}" />`
+                        )
+                        .join("")}
+                    </div>
+                  `
+                  : ""
+              }
+            </div>
+          `
+          : escapeHtml(content.body || "\u5f53\u524d\u4ec5\u914d\u7f6e\u4e86\u6458\u8981\u5185\u5bb9\u3002")
+      }</div>
       <div class="chip-row" style="margin-top:20px">
         <a class="chip" href="${escapeHtml(getSubsectionLink(content))}">\u8fd4\u56de\u5217\u8868</a>
         ${
@@ -349,9 +354,9 @@ function bindCardActions(content) {
       if (!launchUrl) {
         const miniProgramPath = String(content.miniProgramPath || "").trim();
         if (miniProgramPath) {
-          window.alert(`当前暂时无法直接拉起小程序，请先在微信里打开。\n\n小程序路径：${miniProgramPath}`);
+          window.alert(`閻熸粎澧楅幐鍛婃櫠閻樿姹查柛灞剧⊕椤ρ囨煛閸愵亜校缁绢厼鐖奸幆鍕偓娑櫭径宥夋煙瀹勯偊妲奸柟鐧哥悼娴滄瓕绠涢弴妤佺厾闁瑰吋娼欐蹇曟濠靛牊瀚氱€瑰嫭婢樼敮銉╂煕閿斿搫濡煎ù婊勬礃缁岄亶鏁撻悩鍙夘仦闂佺懓鐏氶幐鍝ユ閹达箑违濞ｅ洦鎮廫n闁诲繐绻愮换鎺楀煝閸忓吋鍎熼煫鍥ㄦ皑閻斿懐鈧灚婢樼€氬摜妲?{miniProgramPath}`);
         } else {
-          window.alert("小程序分享版还没准备好，请刷新页面后重试。");
+          window.alert("Mini program path is unavailable in the current environment.");
         }
         return;
       }
@@ -391,57 +396,24 @@ function bindCardActions(content) {
     });
   }
 
-  const openMiniProgramButton = document.getElementById("open-mini-program-btn");
-  if (openMiniProgramButton) {
-    openMiniProgramButton.addEventListener("click", () => {
-      const launchUrl = String(openMiniProgramButton.dataset.miniProgramLaunchUrl || "").trim();
-      if (!launchUrl) {
-        return;
-      }
-      window.location.href = launchUrl;
-    });
-  }
-
-  const openMiniProgramTag = document.getElementById("open-mini-program-tag");
-  if (openMiniProgramTag) {
-    openMiniProgramTag.addEventListener("launch", () => {
-      window.ShareHelper?.showToast?.("正在打开小程序...");
-    });
-    openMiniProgramTag.addEventListener("error", (event) => {
-      const detail = event?.detail ? JSON.stringify(event.detail) : "";
-      window.alert(`小程序拉起失败，请改用复制路径方式排查。${detail ? `\n${detail}` : ""}`);
-    });
-  }
-
-  const copyMiniProgramPathButton = document.getElementById("copy-mini-program-path-btn");
-  if (copyMiniProgramPathButton) {
-    copyMiniProgramPathButton.addEventListener("click", async () => {
-      const miniProgramPath = String(copyMiniProgramPathButton.dataset.miniProgramPath || "").trim();
-      if (!miniProgramPath) {
-        return;
-      }
-
+  const registrationButton = document.querySelector("[data-open-registration]");
+  if (registrationButton) {
+    registrationButton.addEventListener("click", async () => {
       try {
-        if (navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(miniProgramPath);
-        } else {
-          const textarea = document.createElement("textarea");
-          textarea.value = miniProgramPath;
-          textarea.setAttribute("readonly", "readonly");
-          textarea.style.position = "absolute";
-          textarea.style.left = "-9999px";
-          document.body.appendChild(textarea);
-          textarea.select();
-          document.execCommand("copy");
-          textarea.remove();
+        await window.AnalyticsTracker?.ensureUserRegistration?.();
+        if (!window.AnalyticsTracker?.getProfile?.()) {
+          window.AnalyticsTracker?.showRegistrationModal?.({
+            userId: window.AnalyticsTracker?.getUserId?.() || ""
+          });
         }
-
-        window.ShareHelper?.showToast?.("小程序路径已复制");
       } catch (error) {
-        window.alert(`小程序路径：${miniProgramPath}`);
+        window.AnalyticsTracker?.showRegistrationModal?.({
+          userId: window.AnalyticsTracker?.getUserId?.() || ""
+        });
       }
     });
   }
+
 }
 
 async function loadDetail() {

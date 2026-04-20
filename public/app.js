@@ -2,6 +2,10 @@ function isToolGroup(group) {
   return group?.key === "tools-links";
 }
 
+function isProfileSubsection(page, subKey) {
+  return page === "home" && subKey === "profile-home";
+}
+
 function isMiniProgramItem(item) {
   return item?.contentType === "mini-program";
 }
@@ -146,7 +150,24 @@ function openToolItem(item, button) {
 }
 
 function getSubsectionLink(page, groupKey, subKey) {
+  if (isProfileSubsection(page, subKey)) {
+    return "/profile.html";
+  }
   return `/section/${encodeURIComponent(page)}/${encodeURIComponent(groupKey)}/${encodeURIComponent(subKey)}`;
+}
+
+function getSubsectionCountLabel(page, groupKey, subKey, count) {
+  if (isProfileSubsection(page, subKey)) {
+    return "立即进入";
+  }
+  return `${count} items`;
+}
+
+function getSubsectionHint(page, groupKey, subKey) {
+  if (isProfileSubsection(page, subKey)) {
+    return "查看名片、会员状态和个人资料";
+  }
+  return "Open article list";
 }
 
 function getGroupLink(page, groupKey) {
@@ -205,8 +226,8 @@ async function loadPage() {
               >
                 <span class="subsection-entry__icon" aria-hidden="true">${getSubsectionIcon(sub)}</span>
                 <span class="subsection-entry__label">${sub.label}</span>
-                <span class="subsection-entry__count">${count} items</span>
-                <span class="subsection-entry__hint">Open article list</span>
+                <span class="subsection-entry__count">${getSubsectionCountLabel(page, group.key, sub.key, count)}</span>
+                <span class="subsection-entry__hint">${getSubsectionHint(page, group.key, sub.key)}</span>
               </a>
             </section>
           `;
@@ -298,6 +319,13 @@ function getSubsectionIcon(sub) {
         <rect x="12" y="16" width="40" height="28" rx="8" stroke="currentColor" stroke-width="3.5"/>
         <path d="M22 50h20M27 44v6M37 44v6" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
         <path d="M22 26h20M22 33h12" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+      </svg>
+    `,
+    "profile-home": `
+      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="32" cy="22" r="10" stroke="currentColor" stroke-width="3.5"/>
+        <path d="M16 50c2.5-8.5 8.5-13 16-13s13.5 4.5 16 13" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+        <path d="M48 18h6M51 15v6" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
       </svg>
     `
   };

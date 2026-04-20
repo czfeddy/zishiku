@@ -20,6 +20,12 @@
         profile: currentUserProfile
       })
     : null;
+  let currentAuthSession = {
+    authenticated: false,
+    userId: "",
+    profile: null,
+    account: null
+  };
   const userStateListeners = new Set();
   let userStatePollTimer = null;
 
@@ -43,6 +49,32 @@
 
   function createUserId() {
     return `user-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  function isGeneratedAnonymousUserId(value) {
+    return /^user-\d+-[a-z0-9]+$/i.test(String(value || "").trim());
+  }
+
+  function buildDefaultAvatar(name) {
+    const label = String(name || "").trim().slice(0, 2) || "用户";
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+        <defs>
+          <linearGradient id="profile-g" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#0f766e" />
+            <stop offset="100%" stop-color="#2563eb" />
+          </linearGradient>
+        </defs>
+        <rect width="96" height="96" rx="28" fill="url(#profile-g)" />
+        <text x="50%" y="50%" text-anchor="middle" dominant-baseline="central" font-family="Microsoft YaHei, PingFang SC, sans-serif" font-size="28" fill="#ffffff">${escapeHtml(label)}</text>
+      </svg>
+    `;
+    return `data:image/svg+xml;base64,${window.btoa(unescape(encodeURIComponent(svg)))}`;
+  }
+
+  function isRegistrationComplete(profile) {
+    const userId = String(profile?.userId || "").trim();
+    return Boolean(userId) && !isGeneratedAnonymousUserId(userId);
   }
 
   function getAnalyticsUserId() {
@@ -145,6 +177,8 @@
       ? {
           userId: String(state.userId || "").trim(),
           profile: state.profile || null,
+          account: state.account || null,
+          authenticated: Boolean(state.authenticated),
           vip: state.vip || null,
           growthCustomer: state.growthCustomer || null,
           growthCustomers: Array.isArray(state.growthCustomers) ? state.growthCustomers : [],
@@ -153,6 +187,8 @@
       : {
           userId: "",
           profile: null,
+          account: null,
+          authenticated: false,
           vip: null,
           growthCustomer: null,
           growthCustomers: [],
@@ -225,47 +261,60 @@
       <div class="registration-modal__backdrop"></div>
       <div class="registration-modal__panel" role="dialog" aria-modal="true" aria-labelledby="registration-title">
         <div class="registration-modal__header">
-          <p class="registration-modal__eyebrow">鏂扮敤鎴锋敞鍐?/p>
-          <h2 id="registration-title">鍏堝畬鍠勪綘鐨勮祫鏂?/h2>
-          <p class="registration-modal__desc">璇峰～鍐欏ご鍍忋€両D銆佺數璇濄€傚井淇°€佸ご琛斻€佸鍚嶃€佷粙缁嶅彲閫夈€?/p>
+          <p class="registration-modal__eyebrow">首次使用</p>
+          <h2 id="registration-title">请先完善个人资料</h2>
+          <p class="registration-modal__desc">首次打开 H5 需先填写用户名。头像、微信号、电话、头衔和个人介绍都可以稍后再补充。</p>
         </div>
         <form id="user-registration-form" class="registration-form">
           <div class="registration-avatar-row">
             <div class="registration-avatar-preview" id="registration-avatar-preview">
-              <span>澶村儚</span>
+              <span>头像</span>
             </div>
             <div class="registration-avatar-actions">
               <input id="registration-avatar-file" type="file" accept="image/*" />
               <input id="registration-avatar-url" name="avatarUrl" type="hidden" />
-              <p class="registration-help">鏀寔涓婁紶 JPG銆丳NG銆乄EBP锛屽ぇ灏忎笉瓒呰繃 5MB銆?/p>
+              <p class="registration-help">支持上传 JPG、PNG、GIF、WEBP、HEIC、HEIF，大小不超过 5MB。</p>
             </div>
           </div>
           <label>
-            ID
+            用户名
             <input id="registration-user-id" name="userId" type="text" maxlength="60" required />
           </label>
           <label>
-            濮撳悕
+            姓名
             <input id="registration-name" name="name" type="text" maxlength="40" />
           </label>
           <label>
-            澶磋
+            头衔
             <input id="registration-title-input" name="title" type="text" maxlength="60" />
           </label>
           <label>
-            浠嬬粛
+            个人介绍
             <textarea id="registration-introduction" name="introduction" rows="3" maxlength="300"></textarea>
           </label>
           <label>
-            鐢佃瘽
-            <input id="registration-phone" name="phone" type="text" maxlength="30" required />
+            电话（选填）
+            <input id="registration-phone" name="phone" type="text" maxlength="30" placeholder="选填" />
           </label>
           <label>
-            寰俊
-            <input id="registration-wechat" name="wechat" type="text" maxlength="60" />
+            微信号（选填）
+            <input id="registration-wechat" name="wechat" type="text" maxlength="60" placeholder="选填" />
           </label>
+          <label>
+            预留手机
+            <input id="registration-recovery-phone" name="recoveryPhone" type="text" maxlength="30" />
+          </label>
+          <label>
+            登录密码
+            <input id="registration-password" name="password" type="password" maxlength="60" placeholder="至少 6 位，可稍后设置" />
+          </label>
+          <label>
+            确认密码
+            <input id="registration-confirm-password" name="confirmPassword" type="password" maxlength="60" placeholder="再次输入登录密码" />
+          </label>
+          <p class="registration-help">微信 H5 目前只能识别微信登录态，无法直接读取你的微信昵称和微信号；系统会尽量生成默认用户名，其余信息你可以按需补充。</p>
           <p id="${registrationStatusId}" class="registration-status" aria-live="polite"></p>
-          <button type="submit" class="primary-btn registration-submit">瀹屾垚娉ㄥ唽</button>
+          <button type="submit" class="primary-btn registration-submit">保存并进入</button>
         </form>
       </div>
     `;
@@ -275,16 +324,27 @@
     const avatarFileInput = modal.querySelector("#registration-avatar-file");
     const avatarUrlInput = modal.querySelector("#registration-avatar-url");
     const avatarPreview = modal.querySelector("#registration-avatar-preview");
+    const registrationPhoneInput = modal.querySelector("#registration-phone");
+    const registrationWechatInput = modal.querySelector("#registration-wechat");
+
+    registrationPhoneInput?.removeAttribute("required");
+    registrationWechatInput?.removeAttribute("required");
+    if (registrationPhoneInput) {
+      registrationPhoneInput.required = false;
+    }
+    if (registrationWechatInput) {
+      registrationWechatInput.required = false;
+    }
 
     function updateAvatarPreview(url) {
       const value = String(url || "").trim();
       if (!value) {
-        avatarPreview.innerHTML = "<span>澶村儚</span>";
+        avatarPreview.innerHTML = "<span>头像</span>";
         avatarPreview.classList.remove("has-image");
         return;
       }
 
-      avatarPreview.innerHTML = `<img src="${escapeHtml(value)}" alt="娉ㄥ唽澶村儚棰勮" />`;
+      avatarPreview.innerHTML = `<img src="${escapeHtml(value)}" alt="注册头像预览" />`;
       avatarPreview.classList.add("has-image");
     }
 
@@ -305,7 +365,7 @@
         return;
       }
 
-      setRegistrationStatus("姝ｅ湪涓婁紶澶村儚...", false);
+      setRegistrationStatus("正在上传头像...", false);
       form.querySelector(".registration-submit").disabled = true;
 
       const data = await new Promise((resolve, reject) => {
@@ -314,12 +374,12 @@
           const result = String(reader.result || "");
           const base64 = result.includes(",") ? result.split(",")[1] : "";
           if (!base64) {
-            reject(new Error("鍥剧墖璇诲彇澶辫触"));
+            reject(new Error("图片读取失败"));
             return;
           }
           resolve(base64);
         };
-        reader.onerror = () => reject(new Error("鍥剧墖璇诲彇澶辫触"));
+        reader.onerror = () => reject(new Error("图片读取失败"));
         reader.readAsDataURL(file);
       });
 
@@ -335,14 +395,14 @@
         });
         const result = await response.json();
         if (!response.ok) {
-          throw new Error(result.message || "澶村儚涓婁紶澶辫触");
+          throw new Error(result.message || "头像上传失败");
         }
 
         avatarUrlInput.value = result.file?.url || "";
         updateAvatarPreview(avatarUrlInput.value);
         setRegistrationStatus("头像上传完成，请继续填写资料。", false);
       } catch (error) {
-        setRegistrationStatus(error.message || "澶村儚涓婁紶澶辫触", true);
+        setRegistrationStatus(error.message || "头像上传失败", true);
         avatarFileInput.value = "";
       } finally {
         form.querySelector(".registration-submit").disabled = false;
@@ -354,7 +414,7 @@
       try {
         await uploadAvatar(file);
       } catch (error) {
-        setRegistrationStatus(error.message || "澶村儚涓婁紶澶辫触", true);
+        setRegistrationStatus(error.message || "头像上传失败", true);
       }
     });
 
@@ -364,7 +424,8 @@
       submitButton.disabled = true;
 
       const formData = new FormData(form);
-      const previousUserId = getAnalyticsUserId();
+      const lockedUserId = String(form.dataset.lockedUserId || "").trim();
+      const previousUserId = lockedUserId || currentAuthSession.userId || getAnalyticsUserId();
       const payload = {
         previousUserId,
         userId: String(formData.get("userId") || "").trim(),
@@ -373,17 +434,52 @@
         title: String(formData.get("title") || "").trim(),
         introduction: String(formData.get("introduction") || "").trim(),
         phone: String(formData.get("phone") || "").trim(),
-        wechat: String(formData.get("wechat") || "").trim()
+        wechat: String(formData.get("wechat") || "").trim(),
+        recoveryPhone: String(formData.get("recoveryPhone") || "").trim(),
+        password: String(formData.get("password") || "").trim(),
+        confirmPassword: String(formData.get("confirmPassword") || "").trim()
       };
 
-      if (!payload.avatarUrl) {
-        setRegistrationStatus("请先上传头像。", true);
+      if (!payload.userId) {
+        setRegistrationStatus("请先填写用户名。", true);
         submitButton.disabled = false;
         return;
       }
 
+      if (isGeneratedAnonymousUserId(payload.userId)) {
+        setRegistrationStatus("请将默认临时编号改成你要展示的用户名。", true);
+        submitButton.disabled = false;
+        return;
+      }
+
+      if (lockedUserId && payload.userId !== lockedUserId) {
+        setRegistrationStatus("用户名注册后不可修改，请保持原用户名。", true);
+        submitButton.disabled = false;
+        return;
+      }
+
+      if (!payload.name) {
+        payload.name = payload.userId;
+      }
+
+      if (payload.password && payload.password.length < 6) {
+        setRegistrationStatus("登录密码至少需要 6 位。", true);
+        submitButton.disabled = false;
+        return;
+      }
+
+      if (payload.password !== payload.confirmPassword) {
+        setRegistrationStatus("两次输入的登录密码不一致。", true);
+        submitButton.disabled = false;
+        return;
+      }
+
+      if (!payload.avatarUrl) {
+        payload.avatarUrl = buildDefaultAvatar(payload.name || payload.userId);
+      }
+
       try {
-        setRegistrationStatus("姝ｅ湪鎻愪氦娉ㄥ唽璧勬枡...", false);
+        setRegistrationStatus("正在提交资料...", false);
         const response = await fetch("/api/users/register", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -396,11 +492,21 @@
 
         window.localStorage.setItem(userKey, result.profile.userId);
         storeUserProfile(result.profile);
+        updateAuthSession({
+          authenticated: true,
+          userId: result.profile.userId,
+          profile: result.profile,
+          account: result.account || null
+        });
         storeSeenNotificationIds(result.profile.userId, []);
         populateRegistrationForm(result.profile);
         hideRegistrationModal();
         startUserStatePolling(result.profile.userId);
         showToast("注册完成，欢迎使用。");
+        if (getCurrentPageName() === "profile") {
+          redirectAfterAuthSuccess("/profile.html");
+          return;
+        }
       } catch (error) {
         setRegistrationStatus(error.message || "娉ㄥ唽澶辫触", true);
       } finally {
@@ -425,14 +531,28 @@
   function populateRegistrationForm(profile = {}) {
     const modal = ensureRegistrationModal();
     const form = modal.querySelector("#user-registration-form");
-    form.querySelector("#registration-user-id").value = String(profile.userId || getAnalyticsUserId()).trim();
-    form.querySelector("#registration-name").value = String(profile.name || "").trim();
+    const userIdInput = form.querySelector("#registration-user-id");
+    const safeName = String(profile.name || "").trim() || String(profile.userId || "").trim();
+    const safeAvatar = String(profile.avatarUrl || "").trim() || buildDefaultAvatar(safeName);
+    const safeUserId = String(profile.userId || getAnalyticsUserId()).trim();
+    const lockedUserId = isRegistrationComplete(profile) ? safeUserId : "";
+    form.querySelector("#registration-user-id").value = safeUserId;
+    form.querySelector("#registration-name").value = safeName;
     form.querySelector("#registration-title-input").value = String(profile.title || "").trim();
     form.querySelector("#registration-introduction").value = String(profile.introduction || "").trim();
     form.querySelector("#registration-phone").value = String(profile.phone || "").trim();
     form.querySelector("#registration-wechat").value = String(profile.wechat || "").trim();
-    form.querySelector("#registration-avatar-url").value = String(profile.avatarUrl || "").trim();
-    modal.updateAvatarPreview(profile.avatarUrl || "");
+    form.querySelector("#registration-recovery-phone").value = String(profile.recoveryPhone || profile.phone || "").trim();
+    form.querySelector("#registration-password").value = "";
+    form.querySelector("#registration-confirm-password").value = "";
+    form.querySelector("#registration-avatar-url").value = safeAvatar;
+    form.dataset.lockedUserId = lockedUserId;
+    if (userIdInput) {
+      userIdInput.readOnly = Boolean(lockedUserId);
+      userIdInput.setAttribute("aria-readonly", lockedUserId ? "true" : "false");
+      userIdInput.title = lockedUserId ? "用户名注册后不可修改" : "";
+    }
+    modal.updateAvatarPreview(safeAvatar);
     setRegistrationStatus("", false);
   }
 
@@ -470,11 +590,103 @@
     return result.profile || null;
   }
 
-  async function ensureUserRegistration() {
-    const storedProfile = getStoredUserProfile();
-    const currentUserId = getAnalyticsUserId();
+  async function fetchWechatRegistrationHints() {
+    try {
+      const response = await fetch("/api/wechat/oauth/session");
+      const result = await response.json();
+      if (!response.ok) {
+        return null;
+      }
+      return result && typeof result === "object" ? result : null;
+    } catch (error) {
+      return null;
+    }
+  }
 
-    if (storedProfile?.userId) {
+  function buildRegistrationDraft(profile = {}, hints = {}) {
+    const fallbackUserId = String(hints.suggestedUserId || "").trim() || getAnalyticsUserId();
+    const nextUserId = String(profile.userId || "").trim();
+    const safeUserId =
+      nextUserId && !isGeneratedAnonymousUserId(nextUserId) ? nextUserId : fallbackUserId;
+    const nextName = String(profile.name || "").trim() || String(hints.suggestedName || "").trim() || safeUserId;
+
+    return {
+      userId: safeUserId,
+      name: nextName,
+      title: String(profile.title || "").trim(),
+      introduction: String(profile.introduction || "").trim(),
+      phone: String(profile.phone || "").trim(),
+      recoveryPhone: String(profile.recoveryPhone || profile.phone || "").trim(),
+      wechat: String(profile.wechat || "").trim() || String(hints.suggestedWechat || "").trim(),
+      avatarUrl: String(profile.avatarUrl || "").trim() || buildDefaultAvatar(nextName)
+    };
+  }
+
+  function getCurrentPageName() {
+    return String(document.body?.dataset?.page || "").trim();
+  }
+
+  function getPendingAuthRedirectPath() {
+    try {
+      const rawTarget = String(new URL(window.location.href).searchParams.get("redirect") || "").trim();
+      if (!rawTarget) {
+        return "";
+      }
+
+      const resolved = new URL(rawTarget, window.location.origin);
+      if (resolved.origin !== window.location.origin) {
+        return "";
+      }
+
+      const nextPath = `${resolved.pathname}${resolved.search}${resolved.hash}`;
+      if (!nextPath || nextPath === "/profile.html") {
+        return "";
+      }
+
+      return nextPath;
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function getAuthEntryMode(profile = null) {
+    return isRegistrationComplete(profile || currentUserProfile || currentAuthSession.profile) ? "login" : "register";
+  }
+
+  function redirectToAuthPage(mode = "login") {
+    if (getCurrentPageName() === "profile") {
+      return;
+    }
+
+    const nextUrl = new URL("/profile.html", window.location.origin);
+    nextUrl.searchParams.set("auth", mode === "register" ? "register" : "login");
+    nextUrl.searchParams.set("redirect", `${window.location.pathname}${window.location.search}${window.location.hash}`);
+    window.location.replace(nextUrl.toString());
+  }
+
+  function redirectAfterAuthSuccess(fallbackPath = "/") {
+    const pendingPath = getPendingAuthRedirectPath();
+    const targetPath = pendingPath || String(fallbackPath || "/").trim() || "/";
+    if (targetPath === `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+      window.location.reload();
+      return;
+    }
+    window.location.href = targetPath;
+  }
+
+  async function ensureUserRegistration() {
+    await fetchUserSession().catch(() => null);
+    const pageName = getCurrentPageName();
+    if (!currentAuthSession.authenticated && pageName && pageName !== "profile") {
+      redirectToAuthPage(getAuthEntryMode(getStoredUserProfile()));
+      return null;
+    }
+
+    const storedProfile = getStoredUserProfile();
+    const currentUserId = currentAuthSession.userId || getAnalyticsUserId();
+    const wechatHints = await fetchWechatRegistrationHints();
+
+    if (isRegistrationComplete(storedProfile)) {
       try {
         window.localStorage.setItem(userKey, storedProfile.userId);
       } catch (error) {}
@@ -489,22 +701,48 @@
     }
 
     try {
-      const remoteProfile = await fetchRegisteredProfile(currentUserId);
-      if (remoteProfile) {
+      const lookupUserIds = [
+        String(storedProfile?.userId || "").trim(),
+        String(wechatHints?.suggestedUserId || "").trim(),
+        currentUserId
+      ].filter(Boolean);
+
+      for (const lookupUserId of lookupUserIds) {
+        const remoteProfile = await fetchRegisteredProfile(lookupUserId);
+        if (!remoteProfile) {
+          continue;
+        }
+
         storeUserProfile(remoteProfile);
         emitUserState({
           ...(currentUserState || {}),
-          userId: remoteProfile.userId || currentUserId,
+          userId: remoteProfile.userId || lookupUserId,
           profile: remoteProfile
         });
-        startUserStatePolling(remoteProfile.userId || currentUserId);
-        return remoteProfile;
+        startUserStatePolling(remoteProfile.userId || lookupUserId);
+
+        if (isRegistrationComplete(remoteProfile)) {
+          return remoteProfile;
+        }
+
+        break;
       }
     } catch (error) {
       showToast(error.message || "鍔犺浇鐢ㄦ埛璧勬枡澶辫触", true);
     }
 
-    showRegistrationModal({ userId: currentUserId });
+    if (
+      wechatHints?.configured &&
+      wechatHints?.inWechat &&
+      !wechatHints?.hasOpenId &&
+      !window.location.search.includes("wechatAuth=1")
+    ) {
+      window.location.href = `/api/wechat/oauth/start?redirect=${encodeURIComponent(window.location.href)}`;
+      return null;
+    }
+
+    const draft = buildRegistrationDraft(storedProfile || currentUserProfile || {}, wechatHints || {});
+    showRegistrationModal(draft);
     return null;
   }
 
@@ -770,6 +1008,104 @@
     }
     emitUserState(nextState);
     return nextState;
+  }
+
+  async function fetchUserSession() {
+    const response = await fetch("/api/users/session");
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.message || "加载登录状态失败");
+    }
+    return updateAuthSession(result);
+  }
+
+  async function loginUser(payload) {
+    const response = await fetch("/api/users/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {})
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.message || "登录失败");
+    }
+
+    updateAuthSession({
+      authenticated: true,
+      userId: result.userId,
+      profile: result.profile || null,
+      account: result.account || null
+    });
+    if (result.userId) {
+      startUserStatePolling(result.userId);
+      await fetchUserState(result.userId, { notify: false }).catch(() => {});
+    }
+    return result;
+  }
+
+  async function logoutUser() {
+    const response = await fetch("/api/users/logout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}"
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.message || "退出失败");
+    }
+    updateAuthSession({ authenticated: false, userId: "", profile: null, account: null });
+    return result;
+  }
+
+  async function setUserPassword(payload) {
+    const response = await fetch("/api/users/password/set", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {})
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.message || "设置密码失败");
+    }
+    currentAuthSession.account = result.account || currentAuthSession.account;
+    emitUserState({
+      ...(currentUserState || {}),
+      account: result.account || currentUserState?.account || null,
+      authenticated: true
+    });
+    return result;
+  }
+
+  async function changeUserPassword(payload) {
+    const response = await fetch("/api/users/password/change", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {})
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.message || "修改密码失败");
+    }
+    currentAuthSession.account = result.account || currentAuthSession.account;
+    emitUserState({
+      ...(currentUserState || {}),
+      account: result.account || currentUserState?.account || null,
+      authenticated: true
+    });
+    return result;
+  }
+
+  async function requestPasswordReset(payload) {
+    const response = await fetch("/api/users/password/forgot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {})
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.message || "忘记密码暂不可用");
+    }
+    return result;
   }
 
   function subscribeUserState(listener) {
@@ -1203,6 +1539,39 @@
     });
   }
 
+  function updateAuthSession(session = {}) {
+    currentAuthSession = {
+      authenticated: Boolean(session?.authenticated),
+      userId: String(session?.userId || "").trim(),
+      profile: session?.profile || null,
+      account: session?.account || null
+    };
+
+    if (currentAuthSession.profile?.userId) {
+      try {
+        window.localStorage.setItem(userKey, currentAuthSession.profile.userId);
+      } catch (error) {}
+      storeUserProfile(currentAuthSession.profile);
+    }
+
+    if (currentAuthSession.userId) {
+      emitUserState({
+        ...(currentUserState || {}),
+        userId: currentAuthSession.userId,
+        profile: currentAuthSession.profile || currentUserState?.profile || null,
+        account: currentAuthSession.account || currentUserState?.account || null,
+        authenticated: currentAuthSession.authenticated
+      });
+    } else if (currentUserState) {
+      emitUserState({
+        ...currentUserState,
+        authenticated: false
+      });
+    }
+
+    return currentAuthSession;
+  }
+
   function callWeixinBridge(method, options) {
     return new Promise((resolve, reject) => {
       if (!window.WeixinJSBridge || typeof window.WeixinJSBridge.invoke !== "function") {
@@ -1402,9 +1771,20 @@
     getUserId: getAnalyticsUserId,
     getProfile: () => currentUserProfile,
     getUserState: () => currentUserState,
-    fetchUserState: () => fetchUserState(getAnalyticsUserId()),
+    getAuthSession: () => currentAuthSession,
+    fetchUserState: (userId) => fetchUserState(userId || currentAuthSession.userId || getAnalyticsUserId()),
+    fetchUserSession,
     subscribeUserState,
-    trackSectionView
+    trackSectionView,
+    ensureUserRegistration,
+    showRegistrationModal,
+    loginUser,
+    logoutUser,
+    setUserPassword,
+    changeUserPassword,
+    requestPasswordReset,
+    redirectAfterAuthSuccess,
+    redirectToAuthPage
   };
 
   window.ShareHelper = {

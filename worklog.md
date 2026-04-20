@@ -155,6 +155,45 @@
 ## Existing Mini-Program Share-Shell Capability
 
 - Backend already returns valid `miniProgramLaunchUrl` for content.
+
+# 2026-04-06 Growth Admin Update
+
+## Completed
+
+- Updated the admin growth-management detail panel so each project can be edited directly after clicking "进入详情".
+- Added editable fields for:
+  - project name
+  - amount
+  - details
+  - status
+  - manual progress percentage input
+- Changed project progress editing from display-only preview to real form submission.
+- Connected the detail form to the existing backend update API:
+  - `PUT /api/growth/projects/:projectId`
+- Added progress validation on the admin page:
+  - accepts manual numeric input from `0` to `100`
+  - clamps out-of-range values back into `0-100`
+- Added progress UI sync:
+  - progress bar updates immediately while typing
+  - percentage text updates immediately while typing
+  - when progress reaches `100`, status auto-switches to `completed`
+  - when admin manually selects `completed`, progress auto-fills to `100`
+
+## Files Changed
+
+- `public/admin.js`
+- `public/styles.css`
+
+## Result
+
+- In the admin growth center, each customer project can now be opened in detail, modified, and saved directly.
+- Admin can manually enter the exact progress percentage instead of relying only on static display or review-only flow.
+
+## Verification
+
+- Ran syntax check:
+  - `node --check public/admin.js`
+- Confirmed the new edit form selectors and styles were added for the growth project detail cards.
 - We already verified the API can return real `https://wxaurl.cn/...` launch URLs.
 - Relevant existing files:
   - `app.py`
@@ -370,3 +409,881 @@
 - No service restart was required for this round because the change was limited to static frontend assets.
 - Remaining real-world verification should be done in WeChat on the detail page:
   - `https://zsk.xinyongdai123.com/content/home-loan-categories-bank-house-mortgage-ceshi`
+
+## 2026-04-05 Mini Program Trial Debugging
+
+### What Was Confirmed
+
+- The H5 page was able to launch the mini program successfully.
+- However, the launched page initially still showed old test-only modules.
+- Root cause was not a single issue; it was a combination of:
+  - H5 launch link originally still pointed to `release`
+  - the test content had a cached old `miniProgramLaunchUrl`
+  - the mini program has more than one share-shell page path in the codebase
+  - the developer tool preview homepage was not a reliable indicator of the actual share-shell page used by the H5 launch flow
+
+### Server-Side Trial Switch
+
+- Real deployment host used:
+  - `198.18.0.76`
+- Updated remote `.env`:
+  - `MINI_PROGRAM_ENV_VERSION=trial`
+- Cleared cached launch URL for the current test slug in:
+  - `/opt/zsk-h5/data/content.json`
+- Restarted service:
+  - `systemctl restart zsk-h5.service`
+- Verified active:
+  - `zsk-h5.service` is `active`
+
+### Current Trial Launch State
+
+- The test content API now returns a newly generated trial launch link instead of the previously cached release link.
+- Verified current test content API:
+  - `https://zsk.xinyongdai123.com/api/content/home-loan-categories-bank-house-mortgage-ceshi`
+- At the time of verification, the returned trial URL was:
+  - `https://wxaurl.cn/DQiJrg1aqLt`
+- Practical implication:
+  - when the H5 page calls the mini program now, it should target the trial environment
+
+### Important Mini Program Codebase Finding
+
+- The mini program does not rely on WeChat cloud development for this feature.
+- The share shell uses ordinary `wx.request` to fetch content from:
+  - `https://zsk.xinyongdai123.com/api/content/{slug}`
+- Therefore:
+  - not enabling cloud services is **not** the cause of the share-shell issue
+- The developer tool timeout was caused by the request layer, not by cloud configuration.
+
+### Request-Layer Optimization Added
+
+- Reworked local mini program utility:
+  - `wechat-miniprogram/utils/content.js`
+- Added:
+  - explicit request timeout
+  - relative share image / content link normalization to absolute URLs
+  - local fallback content builder
+- Goal:
+  - even when the developer tool times out on content fetch, the share shell can still render a clean fallback article card for UI verification
+
+### Share-Shell Pages That Must Be Treated As Active
+
+- During debugging, it became clear that the project can land on either of these two mini program pages:
+  - `wechat-miniprogram/pages/h5-share-shell/h5-share-shell`
+  - `wechat-miniprogram/pages/share/index`
+- The second path (`pages/share/index`) still contained the old validation UI even after the first page had been cleaned.
+- Therefore both pages were updated and must continue to be considered part of the active share-shell surface.
+
+### UI Simplification Applied To Both Share-Shell Pages
+
+- Updated files:
+  - `wechat-miniprogram/pages/h5-share-shell/h5-share-shell.js`
+  - `wechat-miniprogram/pages/h5-share-shell/h5-share-shell.wxml`
+  - `wechat-miniprogram/pages/h5-share-shell/h5-share-shell.wxss`
+  - `wechat-miniprogram/pages/share/index.js`
+  - `wechat-miniprogram/pages/share/index.wxml`
+  - `wechat-miniprogram/pages/share/index.wxss`
+- Resulting intended UI for both pages:
+  - remove all test-only top banners / validation descriptions
+  - remove `slug`
+  - remove `H5 链接`
+  - remove `复制 H5 链接`
+  - remove `分享完成后打开 H5 详情页`
+  - keep only article title + summary
+  - keep only one button:
+    - `分享到朋友圈方法`
+- The button now shows:
+  - `点击右上方三个点，再点击“分享到朋友圈”。`
+
+### Final Cleanup Applied
+
+- The article cover image block shown at the top of the shell card was also removed from both pages.
+- Current intended minimal shell page should contain only:
+  - article title
+  - article summary
+  - one button for Moments sharing instructions
+
+### Why Developer Tool Still Showed Old Content Earlier
+
+- When the developer tool still displayed the large old validation UI, the most likely explanations were:
+  - the tool was running an older uploaded package
+  - the tool preview entry was not the same page path as the active H5 launch path
+  - only one of the two shell pages had been cleaned, while the other still retained the old modules
+- After both shell page paths were aligned, the remaining visible large block was the article cover image area, which was later explicitly removed as well.
+
+### Current Local Source Of Truth
+
+- The current local source in this repo no longer contains the old validation text modules.
+- Searching the repo no longer finds strings such as:
+  - `只新增一个小程序分享页`
+  - `先在当前页分享，不要进入 H5 后再分享`
+  - `卡片预览`
+  - `H5 链接`
+  - `分享完成后打开 H5 详情页`
+  - `复制 H5 链接`
+
+### Exact Next Step For A New Thread
+
+1. In WeChat DevTools, recompile the project at:
+   - `C:\Users\Administrator\Documents\zhishiku\wechat-miniprogram`
+2. Re-upload a new trial / experience build after the latest cleanup.
+3. Re-test from the H5 entry:
+   - `https://zsk.xinyongdai123.com/content/home-loan-categories-bank-house-mortgage-ceshi`
+4. Confirm that the launched mini program shell now shows only:
+   - article title
+   - article summary
+   - `分享到朋友圈方法`
+5. If old UI still appears after re-upload:
+   - verify the exact page path landed in the mini program
+   - confirm the uploaded package is built from this local folder:
+     - `C:\Users\Administrator\Documents\zhishiku\wechat-miniprogram`
+6. After the trial page is visually confirmed, continue real-device Moments verification and only then proceed to formal release.
+
+## 2026-04-06 Personal Center / Auth / Content Consistency Update
+
+### Personal Center And Account System
+
+- Added a dedicated personal-center entry on the home page and created:
+  - `public/profile.html`
+  - `public/profile.js`
+- Personal center now supports:
+  - login
+  - logout
+  - set password
+  - change password with old-password verification
+  - forgot-password request placeholder
+- Shared frontend auth helpers were added in:
+  - `public/common.js`
+- Added backend account/session/password APIs in:
+  - `app.py`
+- Added backend account archive records so each username now has a distinct profile/account archive.
+- Added admin-side account archive management view in:
+  - `public/admin.html`
+  - `public/admin.js`
+
+### Forgot Password Placeholder
+
+- Added backend placeholder API for forgot password:
+  - requires userId / phone / code / newPassword / confirmPassword
+  - currently returns a “not enabled yet” style response
+- Added recording fields for:
+  - recovery phone
+  - password update time
+  - last login time
+  - forgot-password request time
+
+### Registration / Edit Profile Fixes
+
+- Fixed garbled text still shown in the registration / profile-edit modal in:
+  - `public/common.js`
+- Replaced the remaining mojibake strings around:
+  - avatar label
+  - upload help text
+  - upload progress
+  - image read failure
+  - avatar upload failure
+  - submit progress
+
+### Avatar Upload Stability Fix
+
+- Root cause:
+  - frontend upload flow was basically correct
+  - server-side image decode path was too strict for some mobile / WeChat payload variants
+- Updated backend upload logic in:
+  - `app.py`
+- Added support for:
+  - `data:image/...;base64,...` prefixed payloads
+  - stripping whitespace/newlines from base64
+  - auto-fixing missing base64 padding
+  - extra suffix support: `.heic` / `.heif`
+- Local verification:
+  - `python -m py_compile app.py`
+  - sample upload test succeeded with a `data:`-prefixed payload and whitespace inside base64
+
+### Detail Page Cleanup
+
+- Removed the automatically appended “朋友圈小程序卡片测试” block from article detail rendering in:
+  - `public/detail.js`
+- Verified locally that:
+  - `renderMiniProgramBridge` no longer exists
+  - the test text no longer exists in the current local file
+
+### Online Sync For Detail Cleanup
+
+- Initial user report showed the test block still existed online.
+- Confirmed root cause:
+  - local file had been updated
+  - online `/public/detail.js` was still the old version
+- Real deployment host used:
+  - `198.18.0.76`
+- Synced the latest `public/detail.js` to:
+  - `/opt/zsk-h5/public/detail.js`
+- Verified after sync:
+  - remote file hash matches local file hash
+  - online `https://zsk.xinyongdai123.com/detail.js` no longer contains:
+    - `renderMiniProgramBridge`
+    - `朋友圈小程序卡片测试`
+
+### H5 Article Content Vs Mini Program Shell Content
+
+- Requirement:
+  - ensure the article content shown in frontend H5 and in the mini-program shell is consistent
+- Updated:
+  - `wechat-miniprogram/utils/content.js`
+  - `wechat-miniprogram/pages/h5-share-shell/h5-share-shell.wxml`
+  - `wechat-miniprogram/pages/h5-share-shell/h5-share-shell.wxss`
+  - `wechat-miniprogram/pages/share/index.wxml`
+  - `wechat-miniprogram/pages/share/index.wxss`
+- Changes made:
+  - mini-program shell now normalizes content directly from the H5 `/api/content/{slug}` response
+  - shell now also carries `bodyPreview` derived from H5 `body`
+  - removed misleading fixed fallback article copy
+  - fallback is now a neutral loading/sync message instead of a hard-coded article
+- Goal:
+  - when API succeeds, shell card title/summary/body preview aligns with the same article source as H5
+  - when API fails temporarily, shell no longer shows another unrelated article
+
+### Validation Performed
+
+- Passed syntax / compile checks:
+  - `python -m py_compile app.py`
+  - `node --check public/common.js`
+  - `node --check public/profile.js`
+  - `node --check public/admin.js`
+  - `node --check public/detail.js`
+  - `node --check wechat-miniprogram/utils/content.js`
+  - `node --check wechat-miniprogram/pages/h5-share-shell/h5-share-shell.js`
+  - `node --check wechat-miniprogram/pages/share/index.js`
+
+### Frontend Access Hardening And Note Nav Cleanup
+
+- Requirement:
+  - remove the frontend entry that could jump directly into backend/admin pages
+  - remove all obvious frontend-to-backend direct access paths
+  - remove the unexpected `Note` item that appeared in the top nav after entering the achievements page
+- Frontend navigation cleanup:
+  - removed `/admin.html` entry from user-facing navs in:
+    - `public/index.html`
+    - `public/achievements.html`
+    - `public/profile.html`
+    - `public/recharge.html`
+    - `public/notes.html`
+  - removed `Note` from the achievements-page top nav in:
+    - `public/achievements.html`
+- Test / debug entry cleanup:
+  - removed direct backend-related entries from:
+    - `public/frontend-test.html`
+    - `public/backend-test.html`
+  - removed the `Notes` shortcut from:
+    - `public/frontend-test.html`
+  - updated frontend test copy so it no longer instructs opening backend pages from frontend QA flow:
+    - `public/frontend-test.js`
+- Route mapping cleanup:
+  - removed the `notes` page mapping from:
+    - `public/detail.js`
+    - `public/group.js`
+    - `public/subsection.js`
+  - goal was to prevent `Note` from reappearing through shared page-link helpers even if config or metadata changed later
+- Backend hardening:
+  - added direct public-path blocking in:
+    - `app.py`
+  - blocked paths:
+    - `admin.html`
+    - `backend-test.html`
+    - `frontend-test.html`
+  - effect:
+    - even if someone manually enters those URLs from the public frontend side, the server now returns `404`
+- Additional repair during this round:
+  - several old mojibake/default-string lines in shared frontend JS files were breaking local syntax checks under the current file encoding
+  - replaced only the broken fallback strings with stable ASCII text in:
+    - `public/detail.js`
+    - `public/group.js`
+    - `public/subsection.js`
+    - `public/frontend-test.js`
+  - no functional product flow was intentionally changed beyond the requested entry removal / nav cleanup / path blocking
+- Verification:
+  - `python -m py_compile app.py`
+  - `node --check public/detail.js`
+  - `node --check public/group.js`
+  - `node --check public/subsection.js`
+  - `node --check public/frontend-test.js`
+  - searched repo to confirm no remaining obvious matches for:
+    - `/admin.html`
+    - `/frontend-test.html`
+    - `/backend-test.html`
+    - `href="/notes.html">Note</a>`
+    - `case "notes"`
+
+### Profile Card Optional Phone / WeChat
+
+- Requirement:
+  - when editing the profile card, phone number and WeChat ID should be optional
+  - leaving them empty must not block saving changes
+- Updated:
+  - `public/common.js`
+- Changes made:
+  - labeled phone and WeChat fields as optional in the registration / profile-edit modal
+  - added explicit placeholders to indicate they can be left blank
+  - defensively removed any `required` constraint from those two inputs at modal init time
+- Expected result:
+  - users can save profile changes without filling phone or WeChat
+
+### Username Locked After Registration
+
+- Requirement:
+  - once a username has been registered, it must not be editable
+  - profile editing should only allow changing other fields
+- Updated:
+  - `public/common.js`
+  - `app.py`
+  - `server.js`
+- Changes made:
+  - registration / profile-edit modal now treats an existing registered username as locked and read-only
+  - frontend submit flow now rejects any attempted username change for an already registered profile
+  - backend register/update path now rejects renaming an existing registered `userId` even if someone bypasses the UI
+- Expected result:
+  - first-time registration can still choose a username
+  - after registration, editing profile data no longer allows changing the username
+
+### Auth Redirect And Password Entry
+
+- Requirement:
+  - every user should have a clear option to set or change a password
+  - users who have already logged in should remain in the default logged-in state
+  - personal center should provide a logout action
+  - unauthenticated visitors entering the site should be redirected to the register/login page
+- Updated:
+  - `public/common.js`
+  - `public/profile.js`
+- Changes made:
+  - added a shared auth redirect flow that sends unauthenticated users on non-profile pages to `/profile.html`
+  - auth redirect now carries the original page URL so login/register can return the user to where they came from
+  - registration success and login success now redirect back to the pending page instead of always staying on profile
+  - added a direct `设置密码 / 修改密码` shortcut button on the profile card for logged-in users
+  - profile page now auto-focuses login or auto-opens registration according to the auth redirect mode
+- Expected result:
+  - logged-in users keep their session by default
+  - users can set or change their password from personal center
+  - personal center continues to support logout
+  - unauthenticated users are first taken to the register/login page before using other pages
+
+### Online Sync For Profile/Auth Updates
+
+- Sync target:
+  - `198.18.0.76`
+  - `/opt/zsk-h5`
+- Uploaded:
+  - `public/common.js`
+  - `public/profile.js`
+  - `public/profile.html`
+  - `app.py`
+  - `server.js`
+  - `worklog.md`
+- Service action:
+  - `systemctl restart zsk-h5.service`
+- Runtime verification:
+  - `zsk-h5.service` is `active`
+  - main process is running `python3 /opt/zsk-h5/app.py`
+  - remote `python3 -m py_compile /opt/zsk-h5/app.py` passed
+- Online verification:
+  - `https://zsk.xinyongdai123.com/common.js` contains `redirectAfterAuthSuccess`
+  - `https://zsk.xinyongdai123.com/profile.js` contains `redirectAfterAuthSuccess`
+  - `https://zsk.xinyongdai123.com/profile.js` contains `data-open-password`
+  - remote `worklog.md` now contains:
+    - `Profile Card Optional Phone / WeChat`
+    - `Username Locked After Registration`
+    - `Auth Redirect And Password Entry`
+- Note:
+  - the remote host does not have `node` installed, so remote JS syntax verification was not run there
+  - local `node --check` verification had already passed before sync
+
+### Analytics Percentage And Legacy Section Key Fix
+
+- Requirement:
+  - in admin `用户痕迹管理`, the section percentage must be calculated as a section's click count divided by the total click count across all sections
+  - the page was showing abnormal values because the backend response structure did not match the admin frontend expectations
+  - some historical analytics records used old section key `bank-loans`, which no longer matched the current section config and could not resolve the proper label
+- Updated:
+  - `app.py`
+  - `server.js`
+- Changes made:
+  - aligned Python `/api/analytics` response fields with the admin frontend renderer, including `clickPercentage`, `sharePercentage`, `totalShares`, user section stats, and article stats
+  - updated Python analytics tracking to keep action type, share counters, and article-level stats in a backward-compatible way
+  - added legacy section-key alias handling so old records using `bank-loans` now resolve to the current section label `银行信用贷`
+  - kept the percentage logic consistent with the requested formula: section clicks divided by total clicks of all sections
+- Expected result:
+  - admin `用户痕迹管理` now shows normal percentage values instead of abnormal fallback text
+  - historical analytics rows with old section keys display the correct Chinese section name
+- Verification:
+  - `python -m py_compile app.py`
+  - `node --check server.js`
+  - direct local check of `build_analytics_response()` confirmed returned subsection stats now include:
+    - valid `clickPercentage`
+    - valid `totalShares`
+    - resolved legacy label for `bank-loans`
+
+### Admin Account Archive Password Reset
+
+- Requirement:
+  - in the admin page, add an option to change password for a specified user
+  - admin should be able to type a username directly, or pick one from the existing account archive list
+- Updated:
+  - `public/admin.html`
+  - `public/admin.js`
+  - `server.js`
+  - `app.py`
+- Changes made:
+  - added an admin-side password reset form under account archive management
+  - form now supports:
+    - username input
+    - new password
+    - confirm password
+    - optional recovery phone
+  - added `fill into password reset` action on each account archive card so admins can quickly target an existing user
+  - added admin password update API:
+    - `POST /api/users/password/admin-set`
+  - completed Node-side account archive support so admin page can read account summaries from:
+    - `GET /api/users/accounts`
+  - kept Python runtime aligned by adding the same admin password reset endpoint there as well
+- Expected result:
+  - admin can modify a specific user's password directly from backend management
+  - account archive list can be used as a shortcut instead of manually retyping usernames
+
+### Admin Login And Trusted IP Bypass
+
+- Requirement:
+  - backend management must require an administrator account and password before entering
+  - one or more trusted admin IPs should be allowed to enter backend management without login
+- Updated:
+  - `public/admin.html`
+  - `public/admin.js`
+  - `server.js`
+  - `.env.example`
+- Changes made:
+  - added admin auth session APIs:
+    - `GET /api/admin/session`
+    - `POST /api/admin/login`
+    - `POST /api/admin/logout`
+  - added admin login panel to `admin.html`
+  - admin page now checks access state first:
+    - trusted IP: enters backend automatically
+    - non-trusted IP: must log in with admin username/password
+  - added logout button for non-trusted-IP admin sessions
+  - added server-side admin session storage and cookie-based session handling in Node runtime
+  - added trusted-IP whitelist support through environment variables
+  - protected backend management APIs with admin access checks so direct API calls are no longer enough without admin access
+- New environment variables:
+  - `ADMIN_USERNAME`
+  - `ADMIN_PASSWORD`
+  - `ADMIN_TRUSTED_IPS`
+  - `ADMIN_SESSION_TTL_HOURS`
+- Expected result:
+  - backend page no longer opens directly for ordinary visitors
+  - admins can log in normally from non-whitelisted IPs
+  - trusted office/home IPs can bypass login and open backend directly
+- Verification:
+  - `node --check server.js`
+  - `node --check public/admin.js`
+
+## 2026-04-06 Admin Stability / Security / Version 1.2 Update
+
+### Backend Admin Error Response Root Cause
+
+- Problem observed:
+  - opening `admin.html` showed plain `Error response`
+  - `/api/admin/session` also returned 404 from the Python runtime
+- Root cause:
+  - real online runtime is `app.py`
+  - admin auth routes previously existed only in `server.js`
+  - `app.py` also blocked public access to `admin.html`
+- Fix applied:
+  - added Python admin auth routes:
+    - `GET /api/admin/session`
+    - `POST /api/admin/login`
+    - `POST /api/admin/logout`
+  - removed `admin.html` from the blocked-public-path list in Python runtime
+  - aligned Python runtime behavior with the existing admin frontend
+
+### Admin Account Configuration
+
+- Updated server-side admin credentials:
+  - username: `dai`
+  - password: `123456`
+- Verification:
+  - admin login API accepted the configured credentials
+  - admin session API returned authenticated state after login
+
+### Admin Self Password Change
+
+- Requirement:
+  - backend should provide a way for the administrator to change their own login password
+- Updated:
+  - `public/admin.html`
+  - `public/admin.js`
+  - `app.py`
+- Changes made:
+  - added dedicated admin self-password form
+  - added backend API:
+    - `POST /api/admin/password/change`
+  - new admin password is now persisted into server `.env`
+  - verified by changing the admin password to a temporary value and then changing it back
+
+### Admin View Isolation Fix
+
+- Problem observed:
+  - when opening `账号档案管理`, the growth detail module could appear again a short time later
+- Root cause:
+  - growth detail visibility depended on selected customer state
+  - async refresh and growth polling could re-show the panel outside the growth page
+- Fix applied:
+  - added explicit current-admin-view tracking in `public/admin.js`
+  - growth detail panel is now allowed to render only inside `growth-management`
+  - growth polling now runs only while the growth page is active
+- Expected result:
+  - account archive management no longer shows unrelated growth modules after delayed refresh
+
+### Admin Security Panel Separation
+
+- Requirement:
+  - `管理员安全设置` should be a standalone backend panel
+  - `账号档案管理` should no longer include admin self-password UI
+- Updated:
+  - `public/admin.html`
+- Changes made:
+  - added a standalone top-nav item:
+    - `管理员安全设置`
+  - moved the admin self-password form out of `账号档案管理`
+  - placed `管理员安全设置` as the rightmost option in the admin navigation
+
+### Atomic JSON Write Hardening
+
+- Problem observed:
+  - backend operations could briefly trigger `502`
+  - root cause was `content.json` being read during a non-atomic write window
+- Updated:
+  - `app.py`
+- Fix applied:
+  - changed JSON persistence to use temp-file replace instead of direct overwrite
+- Expected result:
+  - avoids transient `JSONDecodeError` caused by empty/partial file reads during write
+
+### Version Mark
+
+- This round is recorded as:
+  - `zhishiku 1.2`
+- Version marker updated in:
+  - `package.json`
+  - `README.md`
+
+## 2026-04-06 Mini Program Share Shell Fix / Version 1.3 Update
+
+### What Was Confirmed
+
+- The live H5 server was already issuing the mini program share entry path:
+  - `/pages/h5-share-shell/h5-share-shell`
+- The old-shell result in real testing did not come from the current H5 path configuration.
+- The remaining mismatch was between:
+  - local shell-only project preview
+  - real released package in the formal mini program main project
+
+### Server-Side Release Link Fix
+
+- Verified active deploy host:
+  - `198.18.0.76`
+- Verified active service:
+  - `zsk-h5.service`
+- Updated remote `.env`:
+  - switched `MINI_PROGRAM_ENV_VERSION` from `trial` to `release`
+- Updated remote content cache:
+  - cleared cached `miniProgramLaunchUrl` values in `/opt/zsk-h5/data/content.json`
+- Restarted:
+  - `systemctl restart zsk-h5.service`
+- Verification:
+  - live API now regenerates the release short link for:
+    - `home-loan-categories-bank-house-mortgage`
+
+### Formal Mini Program Project Identification
+
+- Confirmed the formal upload project is:
+  - `C:\Users\Administrator\Documents\jinxiang\golden-wx`
+- Confirmed the shell-only local project is not the formal full upload target:
+  - `C:\Users\Administrator\Documents\zhishiku\wechat-miniprogram`
+- Reason:
+  - the formal AppID `wxc068fe791aa69ee7` is configured in:
+    - `golden-wx/project.config.json`
+
+### Root Cause In The Main Mini Program Project
+
+- The formal main mini program project still contained the old share-shell UI in:
+  - `C:\Users\Administrator\Documents\jinxiang\golden-wx\pages\h5-share-shell\h5-share-shell.js`
+  - `C:\Users\Administrator\Documents\jinxiang\golden-wx\pages\h5-share-shell\h5-share-shell.wxml`
+  - `C:\Users\Administrator\Documents\jinxiang\golden-wx\pages\h5-share-shell\h5-share-shell.wxss`
+- That old UI matched the previously observed old shell:
+  - warning block
+  - preview card
+  - slug and H5 link metadata
+  - copy-H5-link action
+  - open-H5-after-share action
+
+### Main Project Fix Applied
+
+- Updated main project files:
+  - `C:\Users\Administrator\Documents\jinxiang\golden-wx\pages\h5-share-shell\h5-share-shell.js`
+  - `C:\Users\Administrator\Documents\jinxiang\golden-wx\pages\h5-share-shell\h5-share-shell.wxml`
+  - `C:\Users\Administrator\Documents\jinxiang\golden-wx\pages\h5-share-shell\h5-share-shell.wxss`
+  - `C:\Users\Administrator\Documents\jinxiang\golden-wx\utils\h5Share.js`
+- Changes made:
+  - replaced the old shell UI with the simplified shell UI
+  - kept only article-card presentation, status text, and the share-guide button
+  - added timeout and fallback content handling for remote H5 content loading
+  - preserved the H5 bridge jump flow through `webview-bridge`
+
+### Safe Area Top Spacing Fix
+
+- Problem observed:
+  - after confirming the new shell in the formal main project, page content appeared too close to the status area
+- Updated:
+  - `C:\Users\Administrator\Documents\jinxiang\golden-wx\pages\h5-share-shell\h5-share-shell.wxss`
+- Fix applied:
+  - added safe-area-aware top padding
+  - added full-page box sizing and page background
+
+### Final Preview / Upload Guidance
+
+- Formal upload path:
+  - `C:\Users\Administrator\Documents\jinxiang\golden-wx`
+- Recommended local compile target:
+  - `pages/h5-share-shell/h5-share-shell?slug=home-loan-categories-bank-house-mortgage`
+
+### Latest Version Mark
+
+- Latest recorded version:
+  - `zhishiku 1.3`
+- Version marker updated in:
+  - `package.json`
+  - `README.md`
+  - `worklog.md`
+
+## 2026-04-07 Homepage Group Restructure And Moments Upload Panel
+
+### What Was Changed
+
+- Updated homepage group structure so the live order is now:
+  - `朋友圈图文`
+  - `文章获客`
+  - `精选工具`
+- Removed `个人中心` from the `文章获客` child list.
+- Split `精选工具` back out as a homepage top-level parallel group.
+- Renamed the former `成长体系` title to:
+  - `积分`
+
+### Data / Runtime Changes Applied
+
+- Updated local config sources:
+  - `data/content.json`
+  - `server.js`
+  - `app.py`
+- Added compatibility logic so old existing content records are still routed by `subKey`:
+  - `featured-articles` => `article-center`
+  - `featured-tools` => `tools-links`
+- This was required so older records would still appear in the correct new homepage group without manual data rewrites.
+
+### Production Deployment During This Round
+
+- Verified active deploy host:
+  - `198.18.0.76`
+- Verified active service:
+  - `zsk-h5.service`
+- Applied deploys to:
+  - `/opt/zsk-h5`
+- Remote backups created during this round:
+  - `/opt/zsk-h5_backup_20260407_210622_article_marketing`
+  - `/opt/zsk-h5_backup_20260407_211234_home_groups`
+  - `/opt/zsk-h5_backup_20260407_212313_moments_admin`
+  - `/opt/zsk-h5_backup_20260407_212723_moments_admin_sync`
+
+### Production Incident And Fix
+
+- After the homepage grouping change, the frontend showed:
+  - `Page load failed`
+- Root cause:
+  - Python runtime `/api/content` path used `sub_key` before assignment in `app.py`
+  - this triggered:
+    - `UnboundLocalError: cannot access local variable 'sub_key' where it is not associated with a value`
+- Fix applied:
+  - reordered `sub_key` parsing before calling the group-normalization helper
+- Post-fix verification:
+  - `https://zsk.xinyongdai123.com/api/content?page=home` returns `200`
+  - `https://zsk.xinyongdai123.com/api/config` returns the new homepage group order and labels
+
+### New Moments Upload Admin Panel
+
+- Added a dedicated backend/admin entry for `朋友圈图文上传`.
+- Local files updated:
+  - `public/admin.html`
+  - `public/admin.js`
+  - `public/detail.js`
+  - `public/styles.css`
+- Live public verification confirmed these assets are now online.
+
+### Moments Upload Behavior Implemented
+
+- New admin panel purpose:
+  - publish content only into the `朋友圈图文` board
+- Required inputs:
+  - copy text
+  - one or more images
+- Automatic client-side image handling:
+  - if a selected image is already `<= 1MB`, it is uploaded unchanged
+  - if a selected image is `> 1MB`, it is compressed client-side before upload
+  - target is `<= 1MB` per image
+- Publish flow:
+  - images upload first
+  - payload is then saved as a normal content item under:
+    - `page=home`
+    - `groupKey=article-center`
+    - `subKey=featured-articles`
+- Stored body format for these special posts:
+  - JSON schema marker:
+    - `moments-post-v1`
+- Detail-page rendering was updated so this body schema displays as:
+  - text copy
+  - multi-image gallery
+  - instead of raw JSON text
+
+### Important Deployment Detail
+
+- The Python server serves static files from:
+  - `/opt/zsk-h5/public`
+- External verification was done against:
+  - `https://zsk.xinyongdai123.com/admin.html`
+  - `https://zsk.xinyongdai123.com/admin.js`
+  - `https://zsk.xinyongdai123.com/detail.js?v=20260405a`
+- Verified live markers:
+  - `朋友圈图文上传`
+  - `moments-create`
+  - `compressImageToLimit`
+  - `buildMomentsPayload`
+  - `moments-post-v1`
+
+### Current Known State
+
+- Homepage grouping change is live.
+- `积分` rename is live.
+- Dedicated `朋友圈图文上传` panel is live.
+- Moments detail rendering for `moments-post-v1` is live.
+
+### Suggested Next Steps For A New Thread
+
+1. Open live backend page and do one real publish test through:
+   - `https://zsk.xinyongdai123.com/admin.html#moments-create`
+2. Verify:
+   - multiple images can be selected
+   - an image already below `1MB` is not recompressed
+   - a larger image is compressed and still uploads successfully
+3. Publish one sample item and verify the resulting frontend detail page shows:
+   - copy text
+   - image gallery
+   - correct top-level board placement under `朋友圈图文`
+4. If needed next, add:
+   - image reordering
+   - drag-to-delete / reorder UI
+   - separate cover-image chooser
+   - richer moments text formatting rules
+
+## 2026-04-07 Moments Share Preparation Flow
+
+### What Was Added
+
+- Extended the mini program share shell so `moments-post-v1` content is now recognized as structured Moments material instead of plain body text.
+- Added a one-tap preparation action in:
+  - `wechat-miniprogram/pages/h5-share-shell/h5-share-shell.js`
+  - `wechat-miniprogram/pages/h5-share-shell/h5-share-shell.wxml`
+  - `wechat-miniprogram/pages/h5-share-shell/h5-share-shell.wxss`
+  - `wechat-miniprogram/utils/content.js`
+- The new action now:
+  - copies the Moments copywriting into the system clipboard
+  - downloads article images from the H5 site
+  - saves those images into the system photo album
+  - then instructs the user to tap the top-right menu and choose `分享到朋友圈`
+
+### H5 Entry Adjustment
+
+- Updated `public/detail.js` so Moments-post articles now use a more explicit CTA:
+  - `打开小程序复制文案和图片`
+- This keeps the H5 side honest about platform limits:
+  - H5 still cannot directly open the actual Moments publish composer
+  - the supported path is now `H5 article -> mini program shell -> copy text + save images -> user taps three dots -> share to Moments`
+
+### Verification
+
+- Passed syntax checks:
+  - `node --check public/detail.js`
+  - `node --check wechat-miniprogram/pages/h5-share-shell/h5-share-shell.js`
+  - `node --check wechat-miniprogram/utils/content.js`
+
+### Remaining Real-Device Validation
+
+- Need to verify on a real WeChat device:
+  - first-time album permission request flow
+  - multiple images save successfully
+  - copied copywriting can be pasted directly into the Moments editor
+  - share shell still opens H5 article correctly through `查看原文`
+
+## 2026-04-11 Moments Material Assistant Decision
+
+### Product Decision
+
+- `朋友圈图文` now uses a material-assistant flow, not a link-card sharing flow.
+- `文章获客` keeps the existing mini program card sharing flow.
+- Reason:
+  - WeChat does not provide a standard H5 or mini program API to directly fill the native Moments composer text area and image picker.
+  - The supported compliant flow is to prepare materials first, then let the user manually publish a normal Moments post.
+
+### Implemented Behavior
+
+- For `moments-post-v1` content:
+  - copy the Moments text to clipboard
+  - download and save images to the system album
+  - hide the mini program right-top share menu to reduce accidental link-card sharing
+  - show explicit instructions to return to WeChat, open `发现 - 朋友圈`, choose saved images, paste text, and publish
+- For non-`moments-post-v1` content:
+  - preserve the mini program share menu
+  - keep the card-sharing guidance for article acquisition content
+
+### Files Updated
+
+- H5 detail guidance:
+  - `public/detail.js`
+  - `public/detail.html`
+  - `public/styles.css`
+- Shell prototype project:
+  - `wechat-miniprogram/pages/h5-share-shell/h5-share-shell.js`
+  - `wechat-miniprogram/pages/h5-share-shell/h5-share-shell.wxml`
+  - `wechat-miniprogram/pages/h5-share-shell/h5-share-shell.wxss`
+- Formal mini program project:
+  - `C:\Users\Administrator\Documents\jinxiang\golden-wx\pages\h5-share-shell\h5-share-shell.js`
+  - `C:\Users\Administrator\Documents\jinxiang\golden-wx\pages\h5-share-shell\h5-share-shell.wxml`
+  - `C:\Users\Administrator\Documents\jinxiang\golden-wx\pages\h5-share-shell\h5-share-shell.wxss`
+  - `C:\Users\Administrator\Documents\jinxiang\golden-wx\utils\h5Share.js`
+
+### Verification
+
+- Passed syntax checks:
+  - `node --check public/detail.js`
+  - `node --check wechat-miniprogram/pages/h5-share-shell/h5-share-shell.js`
+  - `node --check wechat-miniprogram/utils/content.js`
+  - `node --check C:\Users\Administrator\Documents\jinxiang\golden-wx\pages\h5-share-shell\h5-share-shell.js`
+  - `node --check C:\Users\Administrator\Documents\jinxiang\golden-wx\utils\h5Share.js`
+- H5 deployed to production:
+  - `https://zsk.xinyongdai123.com/detail.html`
+  - static version bumped to `20260411a`
+
+### Mini Program Review Privacy Wording
+
+- When WeChat review asks for the privacy-protection explanation for album write permission, use this wording:
+  - `用于用户主动使用“朋友圈素材助手”功能时，将用户选择分享的图文素材图片保存到本机相册，方便用户随后在微信朋友圈发布时选择对应图片。应用不会读取用户相册内容，也不会上传、分析或存储用户本机相册中的其他图片。`
+- Shorter fallback wording if the field length is limited:
+  - `用于将用户主动选择的朋友圈图文素材保存到本机相册，方便用户随后手动发布朋友圈；不会读取、上传或存储用户相册中的其他图片。`
+- Suggested permission purpose/name:
+  - `保存朋友圈素材图片`
+  - or `朋友圈素材助手保存图片`

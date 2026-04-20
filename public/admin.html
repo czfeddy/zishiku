@@ -12,24 +12,87 @@
         <p class="eyebrow">后台管理</p>
         <h1>后台管理中心</h1>
         <p class="hero-copy">
-          后台分为 5 个板块：新增内容、内容管理、成长中心管理、资源中心管理、用户痕迹管理。此页仅展示后台管理能力，不展示前端页面内容。
+          后台分为 7 个板块：新增内容、内容管理、成长中心管理、资源中心管理、管理员安全设置、账号档案管理、用户痕迹管理。此页仅展示后台管理能力，不展示前端页面内容。
         </p>
         <div class="chip-row">
+          <a class="chip" href="#moments-create" data-admin-view-link="moments-create">朋友圈图文上传</a>
           <a class="chip" href="#content-create" data-admin-view-link="content-create">新增内容</a>
           <a class="chip" href="#content-management" data-admin-view-link="content-management">内容管理</a>
           <a class="chip" href="#growth-management" data-admin-view-link="growth-management">成长中心管理</a>
           <a class="chip" href="#vip-management" data-admin-view-link="vip-management">资源中心管理</a>
+          <a class="chip" href="#account-management" data-admin-view-link="account-management">账号档案管理</a>
           <a class="chip" href="#analytics-management" data-admin-view-link="analytics-management">用户痕迹管理</a>
+          <a class="chip" href="#admin-security" data-admin-view-link="admin-security">管理员安全设置</a>
+        </div>
+        <p id="admin-access-message" class="hero-copy"></p>
+        <div class="chip-row">
+          <button id="admin-logout-btn" type="button" class="secondary-btn" hidden>退出管理员登录</button>
         </div>
       </div>
     </header>
 
     <main class="admin-shell">
+      <section class="panel" id="admin-auth-panel" hidden>
+        <div class="panel-head">
+          <div>
+            <h2>管理员登录</h2>
+            <p class="hero-copy">请输入管理员账号和密码后进入后台；若当前访问 IP 已加入白名单，将自动免登录放行。</p>
+          </div>
+        </div>
+        <form id="admin-login-form" class="form-grid">
+          <label>
+            管理员账号
+            <input id="admin-login-username" name="username" type="text" placeholder="请输入管理员账号" required />
+          </label>
+          <label>
+            管理员密码
+            <input id="admin-login-password" name="password" type="password" placeholder="请输入管理员密码" required />
+          </label>
+          <div class="chip-row">
+            <button id="admin-login-submit" type="submit" class="primary-btn">登录后台</button>
+          </div>
+        </form>
+        <p id="admin-login-message" class="status-text"></p>
+      </section>
+
+      <div id="admin-app-shell" hidden>
+      <section class="panel" id="moments-create" data-admin-panel="moments-create">
+        <div class="panel-head">
+          <div>
+            <h2>朋友圈图文上传</h2>
+            <p class="hero-copy">这里只用于发布朋友圈图文板块内容。只需填写文案并上传图片，系统会自动压缩到单张 1MB 以内后再上传；原图本来小于等于 1MB 时不会压缩。</p>
+          </div>
+        </div>
+        <form id="moments-form" class="form-grid">
+          <label>
+            文章标题
+            <input id="moments-title" name="title" type="text" maxlength="60" placeholder="可选，不填则自动取文案首行生成标题" />
+          </label>
+          <label>
+            朋友圈文案
+            <textarea id="moments-copy" name="copy" rows="10" placeholder="请输入朋友圈文案" required></textarea>
+          </label>
+          <div class="upload-field">
+            <span class="upload-field__label">朋友圈配图</span>
+            <div class="upload-field__actions">
+              <input id="moments-images" type="file" accept="image/*" multiple />
+              <button id="clear-moments-images" type="button" class="secondary-btn">清空图片</button>
+            </div>
+            <p class="upload-field__hint">支持多图上传。系统会自动把超过 1MB 的图片压缩到 1MB 以内，再上传到服务器。</p>
+            <div id="moments-image-list" class="moments-image-grid"></div>
+          </div>
+          <div class="chip-row">
+            <button id="moments-submit-btn" type="submit" class="primary-btn">发布到朋友圈图文板块</button>
+          </div>
+        </form>
+        <p id="moments-message" class="status-text"></p>
+      </section>
+
       <section class="panel" id="content-create" data-admin-panel="content-create">
         <div class="panel-head">
           <div>
             <h2>新增内容</h2>
-            <p class="hero-copy">在这里新增贷款、文章、工具链接内容。后台按业务类型维护，不再按前端页面结构展示。</p>
+            <p class="hero-copy">在这里维护首页三类内容：朋友圈图文、文章获客、精选工具。前端会按这三个板块顺序展示。</p>
           </div>
         </div>
         <form id="content-form" class="form-grid">
@@ -39,9 +102,9 @@
           <label>
             内容板块
             <select id="admin-category" required>
-              <option value="loans">贷款</option>
-              <option value="articles">文章</option>
-              <option value="tools">工具链接</option>
+              <option value="articles">朋友圈图文</option>
+              <option value="loans">文章获客</option>
+              <option value="tools">精选工具</option>
             </select>
           </label>
           <label id="loan-subsection-label">
@@ -292,6 +355,74 @@
           <div id="analytics-users" class="content-list"></div>
         </div>
       </section>
+
+      <section class="panel" id="account-management" data-admin-panel="account-management" hidden>
+        <div class="panel-head">
+          <div>
+            <h2>账号档案管理</h2>
+            <p class="hero-copy">查看每个用户名对应的档案、密码是否已设置、预留手机以及最近登录时间，并支持后台按用户名直接修改密码。</p>
+          </div>
+          <button id="refresh-account-archives" type="button" class="secondary-btn">刷新账号档案</button>
+        </div>
+
+        <form id="admin-password-form" class="form-grid">
+          <label>
+            用户名
+            <input id="admin-password-user-id" name="userId" type="text" placeholder="请输入要修改密码的用户名" required />
+          </label>
+          <label>
+            新密码
+            <input id="admin-password-value" name="password" type="password" minlength="6" maxlength="60" placeholder="至少 6 位" required />
+          </label>
+          <label>
+            确认新密码
+            <input id="admin-password-confirm" name="confirmPassword" type="password" minlength="6" maxlength="60" placeholder="再次输入新密码" required />
+          </label>
+          <label>
+            预留手机号
+            <input id="admin-password-recovery-phone" name="recoveryPhone" type="text" placeholder="可选，不填则优先沿用用户档案手机号" />
+          </label>
+          <div class="chip-row">
+            <button id="admin-password-submit" type="submit" class="primary-btn">修改密码</button>
+          </div>
+        </form>
+
+        <p id="account-archive-message" class="status-text"></p>
+        <div id="account-archive-list" class="content-list"></div>
+      </section>
+
+      <section class="panel" id="admin-security" data-admin-panel="admin-security" hidden>
+        <div class="panel-head">
+          <div>
+            <h2>管理员安全设置</h2>
+            <p class="hero-copy">用于当前管理员账号修改后台登录密码。修改完成后，新密码会立即生效并写入服务器配置。</p>
+          </div>
+        </div>
+
+        <form id="admin-self-password-form" class="form-grid">
+          <label>
+            管理员账号
+            <input id="admin-self-username" name="username" type="text" readonly />
+          </label>
+          <label>
+            当前密码
+            <input id="admin-self-current-password" name="currentPassword" type="password" minlength="6" maxlength="60" placeholder="请输入当前登录密码" required />
+          </label>
+          <label>
+            新密码
+            <input id="admin-self-new-password" name="newPassword" type="password" minlength="6" maxlength="60" placeholder="至少 6 位" required />
+          </label>
+          <label>
+            确认新密码
+            <input id="admin-self-confirm-password" name="confirmPassword" type="password" minlength="6" maxlength="60" placeholder="再次输入新密码" required />
+          </label>
+          <div class="chip-row">
+            <button id="admin-self-password-submit" type="submit" class="primary-btn">修改管理员密码</button>
+          </div>
+        </form>
+        <p id="admin-self-password-message" class="status-text"></p>
+      </section>
+      </div>
     </main>
 
     <script src="/admin.js"></script>

@@ -4,8 +4,18 @@
       "label": "首页",
       "groups": [
         {
+          "key": "article-center",
+          "label": "朋友圈图文",
+          "children": [
+            {
+              "key": "featured-articles",
+              "label": "精选文章"
+            }
+          ]
+        },
+        {
           "key": "loan-categories",
-          "label": "贷款种类",
+          "label": "文章获客",
           "children": [
             {
               "key": "bank-house-mortgage",
@@ -31,22 +41,11 @@
         },
         {
           "key": "tools-links",
-          "label": "工具链接",
+          "label": "精选工具",
           "children": [
             {
               "key": "featured-tools",
               "label": "精选工具"
-            }
-          ]
-        },
-        {
-          "key": "article-center",
-          "label": "文章",
-          "adminOnly": true,
-          "children": [
-            {
-              "key": "featured-articles",
-              "label": "精选文章"
             }
           ]
         }
@@ -72,7 +71,7 @@
       ]
     },
     "achievements": {
-      "label": "成长体系",
+      "label": "积分",
       "groups": [
         {
           "key": "medals",

@@ -18,6 +18,7 @@ data/*.tmp
 data/*.lock
 data/analytics.json
 data/share-debug.json
+wechat-miniprogram/project.private.config.json
 
 *.log
 *.pid

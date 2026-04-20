@@ -1,73 +1,127 @@
 .share-page {
-  padding: 32rpx 24rpx 48rpx;
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 32rpx 24rpx calc(48rpx + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, #f4f8ff 0%, #eef3f8 100%);
 }
 
-.hero {
-  padding: 36rpx 32rpx;
-  border-radius: 32rpx;
-  background: linear-gradient(145deg, #103f91 0%, #2f74ff 100%);
+.helper-banner {
+  margin-bottom: 24rpx;
+  padding: 28rpx 26rpx;
+  border-radius: 28rpx;
+  background: linear-gradient(135deg, #153d7a 0%, #2c69e8 100%);
   color: #ffffff;
-  box-shadow: 0 18rpx 46rpx rgba(30, 78, 173, 0.18);
+  box-shadow: 0 18rpx 40rpx rgba(31, 87, 191, 0.18);
 }
 
-.hero__eyebrow {
-  font-size: 24rpx;
-  letter-spacing: 4rpx;
+.helper-banner__eyebrow {
+  font-size: 23rpx;
+  line-height: 1.6;
   opacity: 0.82;
 }
 
-.hero__title {
-  margin-top: 14rpx;
-  font-size: 40rpx;
-  line-height: 1.35;
+.helper-banner__title {
+  margin-top: 8rpx;
+  font-size: 34rpx;
+  line-height: 1.45;
   font-weight: 700;
 }
 
-.hero__desc {
-  margin-top: 18rpx;
-  font-size: 26rpx;
+.helper-banner__desc {
+  margin-top: 12rpx;
+  font-size: 24rpx;
   line-height: 1.7;
-  opacity: 0.92;
+  opacity: 0.88;
 }
 
 .card {
-  margin-top: 26rpx;
   overflow: hidden;
   border-radius: 28rpx;
   background: #ffffff;
   box-shadow: 0 18rpx 40rpx rgba(16, 35, 59, 0.08);
 }
 
-.card__label {
-  padding: 22rpx 24rpx 0;
-  color: #4f6b95;
-  font-size: 24rpx;
-}
-
-.card__image {
-  width: calc(100% - 48rpx);
-  height: 280rpx;
-  margin: 18rpx 24rpx 0;
-  border-radius: 22rpx;
-  background: #dbe7ff;
+.card__cover {
+  display: block;
+  width: 100%;
+  height: 320rpx;
+  background: #eef3f8;
 }
 
 .card__body {
-  padding: 24rpx;
+  padding: 28rpx 24rpx;
+}
+
+.card__eyebrow {
+  font-size: 24rpx;
+  line-height: 1.6;
+  font-weight: 600;
+  color: #1f57bf;
 }
 
 .card__title {
-  font-size: 34rpx;
+  margin-top: 8rpx;
+  font-size: 36rpx;
   line-height: 1.45;
   font-weight: 700;
   color: #10233b;
 }
 
 .card__summary {
-  margin-top: 14rpx;
+  margin-top: 16rpx;
   font-size: 26rpx;
   line-height: 1.7;
   color: #4f6077;
+}
+
+.card__content {
+  margin-top: 18rpx;
+  font-size: 24rpx;
+  line-height: 1.8;
+  color: #5b6677;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.moments-box {
+  margin-top: 24rpx;
+  border-radius: 24rpx;
+  background: #f7faff;
+  padding: 24rpx 20rpx;
+}
+
+.moments-box__section + .moments-box__section {
+  margin-top: 20rpx;
+}
+
+.moments-box__label {
+  font-size: 24rpx;
+  line-height: 1.6;
+  font-weight: 600;
+  color: #1f57bf;
+}
+
+.moments-box__text {
+  margin-top: 10rpx;
+  font-size: 24rpx;
+  line-height: 1.8;
+  color: #24364a;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.moments-gallery {
+  margin-top: 14rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.moments-gallery__item {
+  width: 200rpx;
+  height: 200rpx;
+  border-radius: 20rpx;
+  background: #e8eef6;
 }
 
 .status {
@@ -75,6 +129,7 @@
   padding: 18rpx 22rpx;
   border-radius: 20rpx;
   font-size: 25rpx;
+  line-height: 1.6;
 }
 
 .status--info {
@@ -82,44 +137,36 @@
   color: #2257b5;
 }
 
+.status--success {
+  background: #edf9f1;
+  color: #1d7a41;
+}
+
 .status--warn {
   background: #fff4e8;
   color: #a85a0a;
 }
 
-.info-list {
-  margin-top: 24rpx;
-  padding: 10rpx 24rpx;
+.publish-steps {
+  margin-top: 22rpx;
+  padding: 24rpx 22rpx;
   border-radius: 24rpx;
-  background: rgba(255, 255, 255, 0.85);
+  background: #ffffff;
+  box-shadow: 0 12rpx 28rpx rgba(16, 35, 59, 0.06);
 }
 
-.info-list__item {
-  padding: 18rpx 0;
-  border-bottom: 1rpx solid rgba(16, 35, 59, 0.08);
-}
-
-.info-list__item:last-child {
-  border-bottom: 0;
-}
-
-.info-list__label {
-  display: block;
-  font-size: 24rpx;
-  color: #607491;
-}
-
-.info-list__value {
-  display: block;
-  margin-top: 8rpx;
+.publish-steps__title {
   font-size: 28rpx;
-  line-height: 1.6;
+  line-height: 1.5;
+  font-weight: 700;
   color: #10233b;
 }
 
-.info-list__value--small {
-  font-size: 24rpx;
-  word-break: break-all;
+.publish-steps__item {
+  margin-top: 12rpx;
+  font-size: 25rpx;
+  line-height: 1.7;
+  color: #4f6077;
 }
 
 .actions {
@@ -145,24 +192,4 @@
 .ghost-btn {
   color: #6b7280;
   background: #f4f6f8;
-}
-
-.notes {
-  margin-top: 26rpx;
-  padding: 28rpx 26rpx;
-  border-radius: 24rpx;
-  background: rgba(16, 35, 59, 0.88);
-  color: #f7fbff;
-}
-
-.notes__title {
-  font-size: 28rpx;
-  font-weight: 700;
-}
-
-.notes__item {
-  margin-top: 14rpx;
-  font-size: 24rpx;
-  line-height: 1.7;
-  color: rgba(247, 251, 255, 0.86);
 }

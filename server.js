@@ -146,6 +146,16 @@ const wechatAllowedHosts = parseHostnameList(process.env.WECHAT_ALLOWED_HOSTS ||
 const wechatShareAllowedHosts = parseHostnameList(process.env.WECHAT_SHARE_ALLOWED_HOSTS || "", {
   fallbackHosts: Array.from(wechatAllowedHosts)
 });
+const adminUsername = String(process.env.ADMIN_USERNAME || "").trim();
+const adminPassword = String(process.env.ADMIN_PASSWORD || "").trim();
+const adminTrustedIps = new Set(
+  String(process.env.ADMIN_TRUSTED_IPS || process.env.ADMIN_TRUSTED_IP || "")
+    .split(/[,\s]+/)
+    .map((item) => String(item || "").trim().replace(/^::ffff:/, ""))
+    .filter(Boolean)
+);
+const adminSessionCookie = "zhishiku_admin_session";
+const adminSessionTtlSeconds = Math.max(Number(process.env.ADMIN_SESSION_TTL_HOURS || 12) || 12, 1) * 60 * 60;
 const wechatRedisUrl = String(process.env.WECHAT_REDIS_URL || "").trim();
 const wechatCachePrefix = String(process.env.WECHAT_CACHE_PREFIX || "wechat:jsapi").trim() || "wechat:jsapi";
 const siteMeta = {
@@ -300,8 +310,136 @@ function parseCookies(req) {
   }, {});
 }
 
+function getAdminSessionTokenFromRequest(req) {
+  return String(parseCookies(req)[adminSessionCookie] || "").trim();
+}
+
+function isAdminAuthConfigured() {
+  return Boolean(adminUsername && adminPassword);
+}
+
+function cleanupAdminSessions(data) {
+  const sessions = data.adminSessions && typeof data.adminSessions === "object" ? data.adminSessions : {};
+  const now = Date.now();
+  Object.entries(sessions).forEach(([token, session]) => {
+    const expiresAt = Date.parse(String(session?.expiresAt || ""));
+    if (!session || typeof session !== "object" || !expiresAt || expiresAt <= now) {
+      delete sessions[token];
+    }
+  });
+  data.adminSessions = sessions;
+}
+
+function isTrustedAdminIp(req) {
+  return adminTrustedIps.has(getRequestIp(req));
+}
+
+function getAdminAuthState(data, req) {
+  cleanupAdminSessions(data);
+  const requestIp = getRequestIp(req);
+  if (isTrustedAdminIp(req)) {
+    return {
+      authenticated: true,
+      username: adminUsername || "admin",
+      viaTrustedIp: true,
+      ip: requestIp,
+      configured: isAdminAuthConfigured()
+    };
+  }
+
+  if (!isAdminAuthConfigured()) {
+    return {
+      authenticated: false,
+      username: "",
+      viaTrustedIp: false,
+      ip: requestIp,
+      configured: false
+    };
+  }
+
+  const token = getAdminSessionTokenFromRequest(req);
+  const session = token ? data.adminSessions?.[token] : null;
+  const expiresAt = Date.parse(String(session?.expiresAt || ""));
+  if (!session || !expiresAt || expiresAt <= Date.now() || session.username !== adminUsername) {
+    if (token) {
+      delete data.adminSessions[token];
+    }
+    return {
+      authenticated: false,
+      username: "",
+      viaTrustedIp: false,
+      ip: requestIp,
+      configured: true
+    };
+  }
+
+  return {
+    authenticated: true,
+    username: session.username,
+    viaTrustedIp: false,
+    ip: requestIp,
+    configured: true,
+    expiresAt: session.expiresAt
+  };
+}
+
+function createAdminSession(data, username) {
+  cleanupAdminSessions(data);
+  const token = crypto.randomBytes(24).toString("hex");
+  const now = new Date().toISOString();
+  data.adminSessions[token] = {
+    username: String(username || "").trim(),
+    createdAt: now,
+    updatedAt: now,
+    expiresAt: new Date(Date.now() + adminSessionTtlSeconds * 1000).toISOString()
+  };
+  return token;
+}
+
+function revokeAdminSession(data, token) {
+  if (token) {
+    delete data.adminSessions[token];
+  }
+}
+
+function requireAdminAccess(req, res) {
+  const data = readData();
+  const admin = getAdminAuthState(data, req);
+  writeData(data);
+  if (admin.authenticated) {
+    return { ok: true, data, admin };
+  }
+
+  res.status(admin.configured ? 401 : 503).json({
+    message: admin.configured ? "admin login required" : "admin auth not configured",
+    authenticated: false,
+    trustedIp: admin.viaTrustedIp,
+    ip: admin.ip,
+    configured: admin.configured
+  });
+  return { ok: false, data, admin };
+}
+
 function getWechatOpenIdFromRequest(req) {
   return String(parseCookies(req).wechat_openid || "").trim();
+}
+
+function buildWechatRegistrationHints(req) {
+  const openId = getWechatOpenIdFromRequest(req);
+  if (!openId) {
+    return {
+      suggestedUserId: "",
+      suggestedName: "",
+      suggestedWechat: ""
+    };
+  }
+
+  const suffix = openId.slice(-8).toLowerCase();
+  return {
+    suggestedUserId: `wx-${suffix}`,
+    suggestedName: `微信用户${suffix.slice(-4)}`,
+    suggestedWechat: ""
+  };
 }
 
 function toAbsoluteUrl(req, value) {
@@ -656,7 +794,24 @@ const loanSubsections = [
   { key: "redeem-bridge-funding", label: "赎楼垫资" },
   { key: "car-loan", label: "车贷" }
 ];
+const articleSubsections = [{ key: "featured-articles", label: "精选文章" }];
 const toolSubsections = [{ key: "featured-tools", label: "精选工具" }];
+const sectionKeyAliases = {
+  "bank-loans": "bank-credit-loan"
+};
+
+function normalizeHomeGroupKey(groupKey, subKey = "") {
+  const safeGroupKey = String(groupKey || "").trim();
+  const safeSubKey = String(subKey || "").trim();
+
+  if (safeSubKey === "featured-articles") {
+    return "article-center";
+  }
+  if (safeSubKey === "featured-tools") {
+    return "tools-links";
+  }
+  return safeGroupKey;
+}
 
 const growthLevelTiers = [
   {
@@ -730,20 +885,19 @@ const defaultData = {
       label: "首页",
       groups: [
         {
+          key: "article-center",
+          label: "朋友圈图文",
+          children: articleSubsections
+        },
+        {
           key: "loan-categories",
-          label: "贷款种类",
+          label: "文章获客",
           children: loanSubsections
         },
         {
           key: "tools-links",
-          label: "工具链接",
+          label: "精选工具",
           children: toolSubsections
-        },
-        {
-          key: "article-center",
-          label: "文章",
-          adminOnly: true,
-          children: [{ key: "featured-articles", label: "精选文章" }]
         }
       ]
     },
@@ -761,7 +915,7 @@ const defaultData = {
       ]
     },
     achievements: {
-      label: "成长体系",
+      label: "积分",
       groups: [
         {
           key: "medals",
@@ -777,6 +931,8 @@ const defaultData = {
   contents: [],
   notes: [],
   userProfiles: {},
+  userAccounts: {},
+  adminSessions: {},
   vipUsers: {},
   userNotifications: {},
   rechargeOrders: [],
@@ -881,6 +1037,12 @@ function readData() {
   if (!data.userProfiles || typeof data.userProfiles !== "object" || Array.isArray(data.userProfiles)) {
     data.userProfiles = {};
   }
+  if (!data.userAccounts || typeof data.userAccounts !== "object" || Array.isArray(data.userAccounts)) {
+    data.userAccounts = {};
+  }
+  if (!data.adminSessions || typeof data.adminSessions !== "object" || Array.isArray(data.adminSessions)) {
+    data.adminSessions = {};
+  }
   if (!data.vipUsers || typeof data.vipUsers !== "object" || Array.isArray(data.vipUsers)) {
     data.vipUsers = {};
   }
@@ -956,6 +1118,20 @@ function normalizeUserProfileRecord(userId, record = {}) {
   };
 }
 
+function normalizeUserAccountRecord(userId, record = {}) {
+  return {
+    userId: String(userId || record.userId || "").trim(),
+    passwordHash: String(record.passwordHash || "").trim(),
+    passwordSalt: String(record.passwordSalt || "").trim(),
+    passwordUpdatedAt: String(record.passwordUpdatedAt || "").trim(),
+    lastLoginAt: String(record.lastLoginAt || "").trim(),
+    recoveryPhone: String(record.recoveryPhone || "").trim(),
+    forgotPasswordRequestedAt: String(record.forgotPasswordRequestedAt || "").trim(),
+    createdAt: String(record.createdAt || "").trim(),
+    updatedAt: String(record.updatedAt || "").trim()
+  };
+}
+
 function getUserProfile(data, userId) {
   if (!userId) {
     return null;
@@ -967,6 +1143,94 @@ function getUserProfile(data, userId) {
   }
 
   return normalizeUserProfileRecord(userId, record);
+}
+
+function getUserAccount(data, userId) {
+  if (!userId) {
+    return null;
+  }
+
+  const record = data.userAccounts?.[userId];
+  if (!record) {
+    return null;
+  }
+
+  return normalizeUserAccountRecord(userId, record);
+}
+
+function buildUserAccountSummary(data, userId) {
+  const account = getUserAccount(data, userId);
+  if (!account) {
+    return {
+      userId: String(userId || "").trim(),
+      hasPassword: false,
+      recoveryPhone: "",
+      lastLoginAt: "",
+      passwordUpdatedAt: "",
+      forgotPasswordRequestedAt: ""
+    };
+  }
+
+  return {
+    userId: account.userId,
+    hasPassword: Boolean(account.passwordHash && account.passwordSalt),
+    recoveryPhone: account.recoveryPhone,
+    lastLoginAt: account.lastLoginAt,
+    passwordUpdatedAt: account.passwordUpdatedAt,
+    forgotPasswordRequestedAt: account.forgotPasswordRequestedAt
+  };
+}
+
+function hashPassword(password, salt) {
+  return crypto.pbkdf2Sync(String(password || ""), String(salt || ""), 100000, 32, "sha256").toString("hex");
+}
+
+function setAccountPassword(account, password, { recoveryPhone = "" } = {}) {
+  const now = new Date().toISOString();
+  const nextAccount = normalizeUserAccountRecord(account?.userId || "", account || {});
+  const salt = crypto.randomBytes(16).toString("hex");
+  nextAccount.passwordSalt = salt;
+  nextAccount.passwordHash = hashPassword(password, salt);
+  nextAccount.passwordUpdatedAt = now;
+  nextAccount.updatedAt = now;
+  nextAccount.createdAt = nextAccount.createdAt || now;
+  if (recoveryPhone) {
+    nextAccount.recoveryPhone = String(recoveryPhone || "").trim();
+  }
+  return nextAccount;
+}
+
+function upsertUserAccount(data, userId, { recoveryPhone = "" } = {}) {
+  const current = getUserAccount(data, userId) || {};
+  const now = new Date().toISOString();
+  const account = normalizeUserAccountRecord(userId, {
+    ...current,
+    userId,
+    recoveryPhone: String(recoveryPhone || current.recoveryPhone || "").trim(),
+    createdAt: current.createdAt || now,
+    updatedAt: now
+  });
+  data.userAccounts[userId] = account;
+  return account;
+}
+
+function getAllUserAccountArchives(data) {
+  const analytics = normalizeAnalyticsData(readAnalytics());
+  const userIds = new Set([
+    ...Object.keys(data.userProfiles || {}),
+    ...Object.keys(data.userAccounts || {}),
+    ...Object.keys(data.vipUsers || {}),
+    ...Object.keys(analytics.users || {})
+  ]);
+
+  return Array.from(userIds)
+    .sort((a, b) => a.localeCompare(b, "zh-CN"))
+    .map((userId) => ({
+      userId,
+      profile: getUserProfile(data, userId),
+      account: buildUserAccountSummary(data, userId),
+      vip: buildVipUserSummary(data, userId, data.vipUsers[userId] || {})
+    }));
 }
 
 function sanitizeUserProfilePayload(body) {
@@ -985,12 +1249,6 @@ function sanitizeUserProfilePayload(body) {
 function validateUserProfilePayload(payload) {
   if (!payload.userId) {
     return "userId required";
-  }
-  if (!payload.avatarUrl) {
-    return "avatarUrl required";
-  }
-  if (!payload.phone) {
-    return "phone required";
   }
   return "";
 }
@@ -2137,12 +2395,14 @@ function resolveSectionMeta(data, page, groupKey, subKey) {
     return null;
   }
 
-  const group = pageConfig.groups.find((item) => item.key === groupKey);
+  const normalizedGroupKey = page === "home" ? normalizeHomeGroupKey(groupKey, subKey) : groupKey;
+  const group = pageConfig.groups.find((item) => item.key === normalizedGroupKey);
   if (!group) {
     return null;
   }
 
-  const sub = group.children.find((item) => item.key === subKey);
+  const normalizedSubKey = sectionKeyAliases[subKey] || subKey;
+  const sub = group.children.find((item) => item.key === subKey) || group.children.find((item) => item.key === normalizedSubKey);
   if (!sub) {
     return null;
   }
@@ -2955,6 +3215,77 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+app.get("/api/admin/session", (req, res) => {
+  const data = readData();
+  const admin = getAdminAuthState(data, req);
+  writeData(data);
+  res.json({
+    authenticated: admin.authenticated,
+    username: admin.username,
+    viaTrustedIp: admin.viaTrustedIp,
+    ip: admin.ip,
+    configured: admin.configured
+  });
+});
+
+app.post("/api/admin/login", (req, res) => {
+  const data = readData();
+  const trustedAdmin = getAdminAuthState(data, req);
+  if (trustedAdmin.viaTrustedIp) {
+    writeData(data);
+    return res.json({
+      message: "trusted ip access granted",
+      authenticated: true,
+      username: trustedAdmin.username,
+      viaTrustedIp: true,
+      ip: trustedAdmin.ip,
+      configured: trustedAdmin.configured
+    });
+  }
+
+  if (!isAdminAuthConfigured()) {
+    writeData(data);
+    return res.status(503).json({ message: "admin auth not configured", configured: false });
+  }
+
+  const username = String(req.body?.username || "").trim();
+  const password = String(req.body?.password || "").trim();
+  if (!username || !password) {
+    writeData(data);
+    return res.status(400).json({ message: "username/password required" });
+  }
+  if (username !== adminUsername || password !== adminPassword) {
+    writeData(data);
+    return res.status(401).json({ message: "invalid admin credentials" });
+  }
+
+  const token = createAdminSession(data, username);
+  writeData(data);
+  res.cookie(adminSessionCookie, token, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: false,
+    path: "/",
+    maxAge: adminSessionTtlSeconds * 1000
+  });
+  res.json({
+    message: "admin login success",
+    authenticated: true,
+    username,
+    viaTrustedIp: false,
+    ip: getRequestIp(req),
+    configured: true
+  });
+});
+
+app.post("/api/admin/logout", (req, res) => {
+  const data = readData();
+  revokeAdminSession(data, getAdminSessionTokenFromRequest(req));
+  writeData(data);
+  res.clearCookie(adminSessionCookie, { path: "/" });
+  res.json({ message: "admin logout success", authenticated: false });
+});
+
 app.get("/api/config", (req, res) => {
   const data = readData();
   res.json({
@@ -2967,14 +3298,19 @@ app.get("/api/content", async (req, res) => {
   const data = readData();
   const page = String(req.query.page || "").trim();
   const groupKey = String(req.query.groupKey || "").trim();
+  const normalizedGroupKey = page === "home" ? normalizeHomeGroupKey(groupKey, subKey) : groupKey;
   const subKey = String(req.query.subKey || "").trim();
 
   let contents = data.contents;
   if (page) {
     contents = contents.filter((item) => item.page === page);
   }
-  if (groupKey) {
-    contents = contents.filter((item) => item.groupKey === groupKey);
+  if (normalizedGroupKey) {
+    contents = contents.filter((item) => {
+      const itemGroupKey =
+        item.page === "home" ? normalizeHomeGroupKey(item.groupKey, item.subKey) : item.groupKey;
+      return itemGroupKey === normalizedGroupKey;
+    });
   }
   if (subKey) {
     contents = contents.filter((item) => item.subKey === subKey);
@@ -3058,10 +3394,12 @@ app.get("/api/wechat/signature", async (req, res) => {
 });
 
 app.get("/api/wechat/oauth/session", (req, res) => {
+  const hints = buildWechatRegistrationHints(req);
   res.json({
     configured: isWechatConfigured(),
     inWechat: isWechatBrowserRequest(req),
-    hasOpenId: Boolean(getWechatOpenIdFromRequest(req))
+    hasOpenId: Boolean(getWechatOpenIdFromRequest(req)),
+    ...hints
   });
 });
 
@@ -3156,6 +3494,17 @@ app.get("/api/users/profile/:userId", (req, res) => {
   res.json({ profile });
 });
 
+app.get("/api/users/accounts", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
+  const data = readData();
+  res.json({
+    accounts: getAllUserAccountArchives(data)
+  });
+});
+
 app.post("/api/users/register", (req, res) => {
   const payload = sanitizeUserProfilePayload(req.body || {});
   const validationMessage = validateUserProfilePayload(payload);
@@ -3165,6 +3514,11 @@ app.post("/api/users/register", (req, res) => {
 
   const data = readData();
   const analytics = normalizeAnalyticsData(readAnalytics());
+  const lockedUserId = getUserProfile(data, payload.previousUserId) ? payload.previousUserId : "";
+
+  if (lockedUserId && payload.userId !== lockedUserId) {
+    return res.status(400).json({ message: "registered userId cannot be changed" });
+  }
 
   if (isReservedUserId(data, analytics, payload.previousUserId, payload.userId)) {
     return res.status(409).json({ message: "userId already exists" });
@@ -3192,13 +3546,70 @@ app.post("/api/users/register", (req, res) => {
   });
 });
 
+app.post("/api/users/password/admin-set", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
+  const userId = String(req.body?.userId || "").trim();
+  const password = String(req.body?.password || "").trim();
+  const confirmPassword = String(req.body?.confirmPassword || "").trim();
+  const recoveryPhone = String(req.body?.recoveryPhone || "").trim();
+
+  if (!userId) {
+    return res.status(400).json({ message: "userId required" });
+  }
+  if (!password || password.length < 6) {
+    return res.status(400).json({ message: "password must be at least 6 characters" });
+  }
+  if (password !== confirmPassword) {
+    return res.status(400).json({ message: "password confirmation mismatch" });
+  }
+
+  const data = readData();
+  const analytics = normalizeAnalyticsData(readAnalytics());
+  const userExists = Boolean(
+    data.userProfiles?.[userId] ||
+      data.userAccounts?.[userId] ||
+      data.vipUsers?.[userId] ||
+      analytics.users?.[userId]
+  );
+
+  if (!userExists) {
+    return res.status(404).json({ message: "user not found" });
+  }
+
+  const profile = getUserProfile(data, userId);
+  const account = upsertUserAccount(data, userId, {
+    recoveryPhone: recoveryPhone || profile?.phone || ""
+  });
+  const updatedAccount = setAccountPassword(account, password, {
+    recoveryPhone: recoveryPhone || profile?.phone || ""
+  });
+  data.userAccounts[userId] = updatedAccount;
+  writeData(data);
+
+  res.status(200).json({
+    message: "password updated",
+    account: buildUserAccountSummary(data, userId)
+  });
+});
+
 app.get("/api/users/vip", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   res.json({
     users: getAllVipUserSummaries()
   });
 });
 
 app.get("/api/users/vip/:userId", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   const userId = String(req.params.userId || "").trim();
   if (!userId) {
     return res.status(400).json({ message: "userId required" });
@@ -3230,12 +3641,21 @@ app.get("/api/growth/customers", (req, res) => {
     });
   }
 
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
+
   res.json({
     customers: getGrowthCustomers(data)
   });
 });
 
 app.get("/api/growth/customers/:customerId", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   const customerId = String(req.params.customerId || "").trim();
   const data = readData();
   const customer = getGrowthCustomers(data).find((item) => item.id === customerId);
@@ -3248,6 +3668,10 @@ app.get("/api/growth/customers/:customerId", (req, res) => {
 });
 
 app.post("/api/users/vip/grant", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   const payload = sanitizeVipGrantPayload(req.body || {});
   if (!payload.userId) {
     return res.status(400).json({ message: "userId required" });
@@ -3282,6 +3706,10 @@ app.post("/api/users/vip/grant", (req, res) => {
 });
 
 app.post("/api/growth/customers", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   const payload = sanitizeGrowthCustomerCreatePayload(req.body || {});
   if (!payload.customerName || !payload.project.loanProject || !payload.project.amount || !payload.project.details) {
     return res.status(400).json({ message: "customerName/loanProject/amount/details required" });
@@ -3332,6 +3760,10 @@ app.post("/api/growth/customers", (req, res) => {
 });
 
 app.post("/api/growth/customers/:customerId/projects", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   const customerId = String(req.params.customerId || "").trim();
   const payload = sanitizeGrowthProjectPayload(req.body || {});
   if (!payload.loanProject || !payload.amount || !payload.details) {
@@ -3654,6 +4086,10 @@ app.all("/api/alipay/pay/notify", (req, res) => {
 });
 
 app.delete("/api/analytics", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   writeAnalytics({
     users: {},
     events: []
@@ -3663,6 +4099,10 @@ app.delete("/api/analytics", (req, res) => {
 });
 
 app.delete("/api/analytics/users/:userId", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   const userId = String(req.params.userId || "").trim();
   if (!userId) {
     return res.status(400).json({ message: "userId required" });
@@ -3703,11 +4143,19 @@ app.post("/api/share-debug", (req, res) => {
 });
 
 app.delete("/api/share-debug", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   writeShareDebug({ events: [] });
   res.json({ message: "cleared" });
 });
 
 app.post("/api/uploads/image", async (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   try {
     const file = await saveUploadedImage(req.body || {});
     res.status(201).json({ message: "uploaded", file });
@@ -3717,6 +4165,10 @@ app.post("/api/uploads/image", async (req, res) => {
 });
 
 app.post("/api/content", async (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   const data = readData();
   const payload = sanitizeContentPayload(req.body || {});
 
@@ -3750,6 +4202,10 @@ app.post("/api/content", async (req, res) => {
 });
 
 app.post("/api/notes", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   const data = readData();
   const payload = sanitizeNotePayload(req.body || {});
 
@@ -3775,6 +4231,10 @@ app.post("/api/notes", (req, res) => {
 });
 
 app.put("/api/content/:id", async (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   const contentId = String(req.params.id || "").trim();
   const payload = sanitizeContentPayload(req.body || {});
   const data = readData();
@@ -3821,6 +4281,10 @@ app.put("/api/content/:id", async (req, res) => {
 });
 
 app.put("/api/notes/:id", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   const noteId = String(req.params.id || "").trim();
   const payload = sanitizeNotePayload(req.body || {});
   const data = readData();
@@ -3851,6 +4315,10 @@ app.put("/api/notes/:id", (req, res) => {
 });
 
 app.put("/api/growth/projects/:projectId", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   const projectId = String(req.params.projectId || "").trim();
   const payload = sanitizeGrowthProjectUpdatePayload(req.body || {});
   const data = readData();
@@ -3901,6 +4369,10 @@ app.put("/api/growth/projects/:projectId", (req, res) => {
 });
 
 app.post("/api/growth/change-requests/:requestId/approve", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   const requestId = String(req.params.requestId || "").trim();
   const replyMessage = String(req.body?.replyMessage || "").trim();
   const data = readData();
@@ -3967,6 +4439,10 @@ app.post("/api/growth/change-requests/:requestId/approve", (req, res) => {
 });
 
 app.post("/api/growth/change-requests/:requestId/reject", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   const requestId = String(req.params.requestId || "").trim();
   const replyMessage = String(req.body?.replyMessage || "").trim();
   const data = readData();
@@ -4014,6 +4490,10 @@ app.post("/api/growth/change-requests/:requestId/reject", (req, res) => {
 });
 
 app.delete("/api/content/:id", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   const contentId = String(req.params.id || "").trim();
   const data = readData();
   const before = data.contents.length;
@@ -4028,6 +4508,10 @@ app.delete("/api/content/:id", (req, res) => {
 });
 
 app.delete("/api/notes/:id", (req, res) => {
+  const access = requireAdminAccess(req, res);
+  if (!access.ok) {
+    return;
+  }
   const noteId = String(req.params.id || "").trim();
   const data = readData();
   const before = data.notes.length;
