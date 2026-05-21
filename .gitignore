@@ -1,6 +1,8 @@
 .env
 .env.local
 .env.*.local
+shop_secret.md
+all_secred.md
 
 node_modules/
 __pycache__/

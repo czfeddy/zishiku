@@ -17,9 +17,13 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 try:
+    from cryptography import x509
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import padding
 except Exception:
+    x509 = None
+    AESGCM = None
     hashes = None
     serialization = None
     padding = None
@@ -70,6 +74,7 @@ MINI_PROGRAM_URL_LINK_EXPIRE_DAYS = min(max(int(os.getenv("MINI_PROGRAM_URL_LINK
 WECHAT_PAY_MCH_ID = str(os.getenv("WECHAT_PAY_MCH_ID", "")).strip()
 WECHAT_PAY_SERIAL_NO = str(os.getenv("WECHAT_PAY_SERIAL_NO", "")).strip()
 WECHAT_PAY_NOTIFY_URL = str(os.getenv("WECHAT_PAY_NOTIFY_URL", "")).strip()
+WECHAT_PAY_API_V3_KEY = str(os.getenv("WECHAT_PAY_API_V3_KEY", "")).strip()
 ADMIN_USERNAME = str(os.getenv("ADMIN_USERNAME", "")).strip()
 ADMIN_PASSWORD = str(os.getenv("ADMIN_PASSWORD", "")).strip()
 ADMIN_SESSION_TTL_SECONDS = max(int(os.getenv("ADMIN_SESSION_TTL_HOURS", "12") or "12"), 1) * 60 * 60
@@ -99,6 +104,20 @@ WECHAT_PAY_PRIVATE_KEY = load_pem_value(
     os.getenv("WECHAT_PAY_PRIVATE_KEY", ""),
     os.getenv("WECHAT_PAY_PRIVATE_KEY_PATH", ""),
 )
+WECHAT_PAY_PLATFORM_CERT = load_pem_value(
+    os.getenv("WECHAT_PAY_PLATFORM_CERT", ""),
+    os.getenv("WECHAT_PAY_PLATFORM_CERT_PATH", ""),
+)
+WECHAT_PAY_PLATFORM_SERIAL_NO = str(os.getenv("WECHAT_PAY_PLATFORM_SERIAL_NO", "")).strip().upper()
+WECHAT_PAY_PUBLIC_KEY = load_pem_value(
+    os.getenv("WECHAT_PAY_PUBLIC_KEY", ""),
+    os.getenv("WECHAT_PAY_PUBLIC_KEY_PATH", ""),
+)
+WECHAT_PAY_PUBLIC_KEY_ID = str(os.getenv("WECHAT_PAY_PUBLIC_KEY_ID", "")).strip().upper()
+WECHAT_PAY_CERTIFICATE_CACHE = {
+    "expires_at": 0,
+    "by_serial": {},
+}
 WECHAT_CACHE = {
     "access_token": "",
     "access_token_expires_at": 0,
@@ -1191,10 +1210,29 @@ def is_wechat_pay_configured():
         and WECHAT_PAY_MCH_ID
         and WECHAT_PAY_SERIAL_NO
         and WECHAT_PAY_PRIVATE_KEY
+        and WECHAT_PAY_API_V3_KEY
         and hashes is not None
         and serialization is not None
         and padding is not None
+        and AESGCM is not None
     )
+
+
+def get_wechat_pay_configured_missing_items():
+    missing = []
+    if not WECHAT_PAY_APP_ID:
+        missing.append("WECHAT_PAY_APP_ID")
+    if not WECHAT_PAY_MCH_ID:
+        missing.append("WECHAT_PAY_MCH_ID")
+    if not WECHAT_PAY_SERIAL_NO:
+        missing.append("WECHAT_PAY_SERIAL_NO")
+    if not WECHAT_PAY_PRIVATE_KEY:
+        missing.append("WECHAT_PAY_PRIVATE_KEY / WECHAT_PAY_PRIVATE_KEY_PATH")
+    if not WECHAT_PAY_API_V3_KEY:
+        missing.append("WECHAT_PAY_API_V3_KEY")
+    if hashes is None or serialization is None or padding is None or AESGCM is None:
+        missing.append("cryptography")
+    return missing
 
 
 def sign_with_wechat_private_key(message: str):
@@ -1256,6 +1294,89 @@ def call_wechat_pay_api(method: str, request_path: str, body: dict | None = None
         except Exception:
             parsed = {"message": raw or f"wechat pay request failed with status {error.code}"}
         raise RuntimeError(parsed.get("message") or parsed.get("detail") or f"wechat pay request failed with status {error.code}")
+
+
+def decrypt_wechat_pay_resource(resource: dict, parse_json: bool = True):
+    if not WECHAT_PAY_API_V3_KEY:
+        raise RuntimeError("WECHAT_PAY_API_V3_KEY not configured")
+    key = WECHAT_PAY_API_V3_KEY.encode("utf-8")
+    if len(key) != 32:
+        raise RuntimeError("WECHAT_PAY_API_V3_KEY must be 32 bytes")
+
+    ciphertext = base64.b64decode(str(resource.get("ciphertext", "")).strip())
+    nonce = str(resource.get("nonce", "")).encode("utf-8")
+    associated_data = str(resource.get("associated_data", "")).encode("utf-8")
+    plaintext = AESGCM(key).decrypt(nonce, ciphertext, associated_data).decode("utf-8")
+    return json.loads(plaintext) if parse_json else plaintext
+
+
+def get_configured_wechat_pay_verification_key(serial_no: str):
+    serial = str(serial_no or "").strip().upper()
+    if WECHAT_PAY_PUBLIC_KEY and (not WECHAT_PAY_PUBLIC_KEY_ID or WECHAT_PAY_PUBLIC_KEY_ID == serial):
+        return WECHAT_PAY_PUBLIC_KEY
+    if WECHAT_PAY_PLATFORM_CERT and (not WECHAT_PAY_PLATFORM_SERIAL_NO or WECHAT_PAY_PLATFORM_SERIAL_NO == serial):
+        return WECHAT_PAY_PLATFORM_CERT
+    return ""
+
+
+def get_public_key_from_wechat_pay_pem(pem_text: str):
+    pem_bytes = str(pem_text or "").strip().encode("utf-8")
+    if b"BEGIN CERTIFICATE" in pem_bytes:
+        if x509 is None:
+            raise RuntimeError("cryptography x509 not available")
+        return x509.load_pem_x509_certificate(pem_bytes).public_key()
+    return serialization.load_pem_public_key(pem_bytes)
+
+
+def get_wechat_pay_verification_key(serial_no: str):
+    serial = str(serial_no or "").strip().upper()
+    configured_key = get_configured_wechat_pay_verification_key(serial)
+    if configured_key:
+        return configured_key
+
+    if not serial:
+        raise RuntimeError("wechat pay signature serial missing")
+
+    cached = WECHAT_PAY_CERTIFICATE_CACHE["by_serial"].get(serial)
+    if cached and WECHAT_PAY_CERTIFICATE_CACHE["expires_at"] > time.time():
+        return cached
+
+    result = call_wechat_pay_api("GET", "/v3/certificates")
+    for item in result.get("data", []) if isinstance(result.get("data"), list) else []:
+        cert_serial = str(item.get("serial_no", "")).strip().upper()
+        certificate = decrypt_wechat_pay_resource(item.get("encrypt_certificate", {}) or {}, parse_json=False)
+        if cert_serial and certificate:
+            WECHAT_PAY_CERTIFICATE_CACHE["by_serial"][cert_serial] = certificate
+
+    WECHAT_PAY_CERTIFICATE_CACHE["expires_at"] = time.time() + 3600
+    cached = WECHAT_PAY_CERTIFICATE_CACHE["by_serial"].get(serial)
+    if not cached:
+        raise RuntimeError(f"wechat pay platform certificate not found for serial {serial}")
+    return cached
+
+
+def verify_wechat_pay_notification_signature(handler: BaseHTTPRequestHandler):
+    timestamp = str(handler.headers.get("Wechatpay-Timestamp", "")).strip()
+    nonce = str(handler.headers.get("Wechatpay-Nonce", "")).strip()
+    signature = str(handler.headers.get("Wechatpay-Signature", "")).strip()
+    serial_no = str(handler.headers.get("Wechatpay-Serial", "")).strip()
+    raw_body = getattr(handler, "raw_body", b"")
+
+    if not timestamp or not nonce or not signature or not serial_no:
+        raise RuntimeError("wechat pay signature headers missing")
+
+    signed_at = float(timestamp)
+    if abs(time.time() - signed_at) > 300:
+        raise RuntimeError("wechat pay notification timestamp expired")
+
+    public_key = get_public_key_from_wechat_pay_pem(get_wechat_pay_verification_key(serial_no))
+    message = f"{timestamp}\n{nonce}\n".encode("utf-8") + raw_body + b"\n"
+    public_key.verify(
+        base64.b64decode(signature),
+        message,
+        padding.PKCS1v15(),
+        hashes.SHA256(),
+    )
 
 
 def get_wechat_pay_notify_url(handler: BaseHTTPRequestHandler):
@@ -1533,6 +1654,37 @@ def apply_recharge_order_state(data: dict, order_index: int, query_result: dict)
 
     data["rechargeOrders"][order_index] = next_order
     return next_order
+
+
+def apply_wechat_recharge_notification(data: dict, transaction: dict):
+    order_id = str(transaction.get("out_trade_no", "")).strip()
+    order_index = find_recharge_order_index(data, order_id)
+    if order_index < 0:
+        raise RuntimeError("order not found")
+
+    order = normalize_recharge_order(data["rechargeOrders"][order_index])
+    if order["paymentMethod"] != "wechat":
+        raise RuntimeError("order payment method mismatch")
+    if str(transaction.get("mchid", "")).strip() != WECHAT_PAY_MCH_ID:
+        raise RuntimeError("wechat pay merchant id mismatch")
+    if str(transaction.get("appid", "")).strip() != WECHAT_PAY_APP_ID:
+        raise RuntimeError("wechat pay appid mismatch")
+
+    expected_total = int(round(float(order.get("amount", 0) or 0) * 100))
+    paid_total = int((transaction.get("amount") or {}).get("total", 0) or 0)
+    if str(transaction.get("trade_state", "")).strip() == "SUCCESS" and paid_total != expected_total:
+        raise RuntimeError("wechat pay amount mismatch")
+
+    return apply_recharge_order_state(
+        data,
+        order_index,
+        {
+            "trade_state": str(transaction.get("trade_state", "")).strip(),
+            "trade_state_desc": str(transaction.get("trade_state_desc", "")).strip(),
+            "transaction_id": str(transaction.get("transaction_id", "")).strip(),
+            "success_time": str(transaction.get("success_time", "")).strip(),
+        },
+    )
 
 
 def build_user_state(data: dict, user_id: str, viewer_user_id: str = ""):
@@ -1866,6 +2018,7 @@ def send_html(handler: BaseHTTPRequestHandler, html: str, status: int = 200, inc
 def parse_json_body(handler: BaseHTTPRequestHandler):
     raw_len = int(handler.headers.get("Content-Length", "0"))
     raw_body = handler.rfile.read(raw_len)
+    handler.raw_body = raw_body
     try:
         return json.loads(raw_body.decode("utf-8") or "{}")
     except json.JSONDecodeError:
@@ -3380,18 +3533,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
             if order_payload["paymentMethod"] == "wechat":
                 if not is_wechat_pay_configured():
-                    missing = []
-                    if not WECHAT_PAY_APP_ID:
-                        missing.append("WECHAT_PAY_APP_ID")
-                    if not WECHAT_PAY_MCH_ID:
-                        missing.append("WECHAT_PAY_MCH_ID")
-                    if not WECHAT_PAY_SERIAL_NO:
-                        missing.append("WECHAT_PAY_SERIAL_NO")
-                    if not WECHAT_PAY_PRIVATE_KEY:
-                        missing.append("WECHAT_PAY_PRIVATE_KEY / WECHAT_PAY_PRIVATE_KEY_PATH")
-                    if hashes is None or serialization is None or padding is None:
-                        missing.append("cryptography")
-                    return json_response(self, 503, {"message": "wechat pay not configured", "missing": missing})
+                    return json_response(self, 503, {"message": "wechat pay not configured", "missing": get_wechat_pay_configured_missing_items()})
 
                 try:
                     gateway_result = create_wechat_h5_transaction(self, order)
@@ -3434,7 +3576,30 @@ class AppHandler(BaseHTTPRequestHandler):
             )
 
         if parsed.path == "/api/wechat/pay/notify":
-            return json_response(self, 200, {"code": "SUCCESS", "message": "OK"})
+            try:
+                if not is_wechat_pay_configured():
+                    return json_response(
+                        self,
+                        503,
+                        {
+                            "code": "FAIL",
+                            "message": "wechat pay not configured: " + ", ".join(get_wechat_pay_configured_missing_items()),
+                        },
+                    )
+
+                verify_wechat_pay_notification_signature(self)
+                resource = payload.get("resource", {}) if isinstance(payload, dict) else {}
+                if str(resource.get("algorithm", "")).strip() != "AEAD_AES_256_GCM":
+                    return json_response(self, 400, {"code": "FAIL", "message": "wechat pay resource algorithm unsupported"})
+
+                transaction = decrypt_wechat_pay_resource(resource)
+                data = read_data()
+                apply_wechat_recharge_notification(data, transaction)
+                write_data(data)
+                return json_response(self, 200, {"code": "SUCCESS", "message": "OK"})
+            except Exception as error:
+                print(f"[wechat-pay] notify failed: {error}", flush=True)
+                return json_response(self, 400, {"code": "FAIL", "message": str(error) or "wechat pay notify failed"})
 
         if parsed.path.startswith("/api/growth/customers/") and parsed.path.endswith("/projects"):
             customer_id = parsed.path.replace("/api/growth/customers/", "", 1).rsplit("/projects", 1)[0].strip()

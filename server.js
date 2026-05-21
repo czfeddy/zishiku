@@ -130,6 +130,17 @@ const wechatPayPrivateKey = loadPemValue(
   process.env.WECHAT_PAY_PRIVATE_KEY,
   process.env.WECHAT_PAY_PRIVATE_KEY_PATH
 );
+const wechatPayApiV3Key = String(process.env.WECHAT_PAY_API_V3_KEY || "").trim();
+const wechatPayPlatformCert = loadPemValue(
+  process.env.WECHAT_PAY_PLATFORM_CERT,
+  process.env.WECHAT_PAY_PLATFORM_CERT_PATH
+);
+const wechatPayPlatformSerialNo = String(process.env.WECHAT_PAY_PLATFORM_SERIAL_NO || "").trim().toUpperCase();
+const wechatPayPublicKey = loadPemValue(
+  process.env.WECHAT_PAY_PUBLIC_KEY,
+  process.env.WECHAT_PAY_PUBLIC_KEY_PATH
+);
+const wechatPayPublicKeyId = String(process.env.WECHAT_PAY_PUBLIC_KEY_ID || "").trim().toUpperCase();
 const wechatPayNotifyUrl = String(process.env.WECHAT_PAY_NOTIFY_URL || "").trim();
 const alipayGatewayHost = normalizeHostname(process.env.ALIPAY_GATEWAY_HOST || "openapi.alipay.com") || "openapi.alipay.com";
 const alipayGatewayPath = String(process.env.ALIPAY_GATEWAY_PATH || "/gateway.do").trim() || "/gateway.do";
@@ -185,6 +196,10 @@ const wechatTicketCache = {
 const miniProgramTokenCache = {
   accessToken: "",
   accessTokenExpiresAt: 0
+};
+const wechatPayCertificateCache = {
+  expiresAt: 0,
+  bySerial: new Map()
 };
 let wechatRedisClient = null;
 let wechatRedisConnectPromise = null;
@@ -247,8 +262,21 @@ function isWechatPayConfigured() {
     wechatPayAppId &&
       wechatPayMerchantId &&
       wechatPayMerchantSerialNo &&
-      wechatPayPrivateKey
+      wechatPayPrivateKey &&
+      wechatPayApiV3Key
   );
+}
+
+function getWechatPayConfiguredMissingItems() {
+  return [
+    ["WECHAT_PAY_APP_ID", wechatPayAppId],
+    ["WECHAT_PAY_MCH_ID", wechatPayMerchantId],
+    ["WECHAT_PAY_SERIAL_NO", wechatPayMerchantSerialNo],
+    ["WECHAT_PAY_PRIVATE_KEY / WECHAT_PAY_PRIVATE_KEY_PATH", wechatPayPrivateKey],
+    ["WECHAT_PAY_API_V3_KEY", wechatPayApiV3Key]
+  ]
+    .filter((item) => !item[1])
+    .map((item) => item[0]);
 }
 
 function getWechatPayNotifyUrl(req) {
@@ -1854,6 +1882,123 @@ function callWechatPayApi({ method, requestPath, body = "" }) {
   });
 }
 
+function decryptWechatPayResource(resource = {}, { parseJson = true } = {}) {
+  if (!wechatPayApiV3Key) {
+    throw new Error("WECHAT_PAY_API_V3_KEY not configured");
+  }
+
+  const key = Buffer.from(wechatPayApiV3Key, "utf8");
+  if (key.length !== 32) {
+    throw new Error("WECHAT_PAY_API_V3_KEY must be 32 bytes");
+  }
+
+  const ciphertext = Buffer.from(String(resource.ciphertext || ""), "base64");
+  if (ciphertext.length <= 16) {
+    throw new Error("wechat pay encrypted resource is invalid");
+  }
+
+  const nonce = Buffer.from(String(resource.nonce || ""), "utf8");
+  const associatedData = Buffer.from(String(resource.associated_data || ""), "utf8");
+  const encrypted = ciphertext.subarray(0, ciphertext.length - 16);
+  const authTag = ciphertext.subarray(ciphertext.length - 16);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, nonce);
+  decipher.setAAD(associatedData);
+  decipher.setAuthTag(authTag);
+
+  const plaintext = Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
+  return parseJson ? JSON.parse(plaintext) : plaintext;
+}
+
+function cacheWechatPayCertificate(serialNo, pem) {
+  const serial = String(serialNo || "").trim().toUpperCase();
+  const certificate = String(pem || "").trim();
+  if (serial && certificate) {
+    wechatPayCertificateCache.bySerial.set(serial, certificate);
+  }
+}
+
+function getConfiguredWechatPayVerificationKey(serialNo) {
+  const serial = String(serialNo || "").trim().toUpperCase();
+
+  if (wechatPayPublicKey && (!wechatPayPublicKeyId || wechatPayPublicKeyId === serial)) {
+    return wechatPayPublicKey;
+  }
+
+  if (wechatPayPlatformCert && (!wechatPayPlatformSerialNo || wechatPayPlatformSerialNo === serial)) {
+    return wechatPayPlatformCert;
+  }
+
+  return "";
+}
+
+async function getWechatPayVerificationKey(serialNo) {
+  const serial = String(serialNo || "").trim().toUpperCase();
+  const configuredKey = getConfiguredWechatPayVerificationKey(serial);
+  if (configuredKey) {
+    return configuredKey;
+  }
+
+  if (!serial) {
+    throw new Error("wechat pay signature serial missing");
+  }
+
+  const cached = wechatPayCertificateCache.bySerial.get(serial);
+  if (cached && wechatPayCertificateCache.expiresAt > Date.now()) {
+    return cached;
+  }
+
+  const result = await callWechatPayApi({
+    method: "GET",
+    requestPath: "/v3/certificates",
+    body: ""
+  });
+
+  const certificates = Array.isArray(result.data) ? result.data : [];
+  for (const item of certificates) {
+    const certSerial = String(item.serial_no || "").trim().toUpperCase();
+    const certificate = decryptWechatPayResource(item.encrypt_certificate || {}, { parseJson: false });
+    cacheWechatPayCertificate(certSerial, certificate);
+  }
+
+  wechatPayCertificateCache.expiresAt = Date.now() + 60 * 60 * 1000;
+  const next = wechatPayCertificateCache.bySerial.get(serial);
+  if (!next) {
+    throw new Error(`wechat pay platform certificate not found for serial ${serial}`);
+  }
+
+  return next;
+}
+
+async function verifyWechatPayNotificationSignature(req) {
+  const timestamp = String(req.headers["wechatpay-timestamp"] || "").trim();
+  const nonce = String(req.headers["wechatpay-nonce"] || "").trim();
+  const signature = String(req.headers["wechatpay-signature"] || "").trim();
+  const serialNo = String(req.headers["wechatpay-serial"] || "").trim();
+  const rawBody = req.rawBody ? req.rawBody.toString("utf8") : JSON.stringify(req.body || {});
+
+  if (!timestamp || !nonce || !signature || !serialNo) {
+    throw new Error("wechat pay signature headers missing");
+  }
+
+  const signedAt = Number(timestamp);
+  if (!Number.isFinite(signedAt) || Math.abs(Date.now() / 1000 - signedAt) > 300) {
+    throw new Error("wechat pay notification timestamp expired");
+  }
+
+  const publicKey = await getWechatPayVerificationKey(serialNo);
+  const message = `${timestamp}\n${nonce}\n${rawBody}\n`;
+  const ok = crypto.verify(
+    "RSA-SHA256",
+    Buffer.from(message, "utf8"),
+    publicKey,
+    Buffer.from(signature, "base64")
+  );
+
+  if (!ok) {
+    throw new Error("wechat pay notification signature invalid");
+  }
+}
+
 async function createWechatH5Transaction(req, order) {
   const requestBody = {
     appid: wechatPayAppId,
@@ -2010,6 +2155,50 @@ function applyRechargeOrderState(data, orderIndex, queryResult = {}) {
 
   data.rechargeOrders[orderIndex] = next;
   return next;
+}
+
+function applyWechatRechargeNotification(data, transaction = {}) {
+  const orderId = String(transaction.out_trade_no || "").trim();
+  const orderIndex = findRechargeOrderIndex(data, orderId);
+  if (orderIndex < 0) {
+    const error = new Error("order not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const order = normalizeRechargeOrderRecord(data.rechargeOrders[orderIndex] || {});
+  if (order.paymentMethod !== "wechat") {
+    const error = new Error("order payment method mismatch");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (String(transaction.mchid || "").trim() !== wechatPayMerchantId) {
+    const error = new Error("wechat pay merchant id mismatch");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (String(transaction.appid || "").trim() !== wechatPayAppId) {
+    const error = new Error("wechat pay appid mismatch");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const expectedTotal = Math.round(Number(order.amount || 0) * 100);
+  const paidTotal = Number(transaction.amount?.total || 0);
+  if (transaction.trade_state === "SUCCESS" && paidTotal !== expectedTotal) {
+    const error = new Error("wechat pay amount mismatch");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return applyRechargeOrderState(data, orderIndex, {
+    trade_state: String(transaction.trade_state || "").trim(),
+    trade_state_desc: String(transaction.trade_state_desc || "").trim(),
+    transaction_id: String(transaction.transaction_id || "").trim(),
+    success_time: String(transaction.success_time || "").trim()
+  });
 }
 
 function applyAlipayRechargeOrderState(data, orderIndex, queryResult = {}) {
@@ -3181,7 +3370,14 @@ app.get("/site-meta.js", (req, res) => {
   res.type("application/javascript").send(`window.SITE_META = ${JSON.stringify(siteMeta, null, 2)};\n`);
 });
 
-app.use(express.json({ limit: "8mb" }));
+app.use(
+  express.json({
+    limit: "8mb",
+    verify(req, res, buffer) {
+      req.rawBody = Buffer.from(buffer || "");
+    }
+  })
+);
 app.use(
   express.static(publicDir, {
     setHeaders(res, filePath) {
@@ -3917,14 +4113,7 @@ app.post("/api/recharge/orders", async (req, res) => {
     if (!isWechatPayConfigured()) {
       return res.status(503).json({
         message: "wechat pay not configured",
-        missing: [
-          ["WECHAT_PAY_APP_ID", wechatPayAppId],
-          ["WECHAT_PAY_MCH_ID", wechatPayMerchantId],
-          ["WECHAT_PAY_SERIAL_NO", wechatPayMerchantSerialNo],
-          ["WECHAT_PAY_PRIVATE_KEY / WECHAT_PAY_PRIVATE_KEY_PATH", wechatPayPrivateKey]
-        ]
-          .filter((item) => !item[1])
-          .map((item) => item[0])
+        missing: getWechatPayConfiguredMissingItems()
       });
     }
 
@@ -4074,11 +4263,41 @@ app.get("/api/recharge/orders/:orderId/status", async (req, res) => {
   });
 });
 
-app.post("/api/wechat/pay/notify", (req, res) => {
-  res.status(200).json({
-    code: "SUCCESS",
-    message: "OK"
-  });
+app.post("/api/wechat/pay/notify", async (req, res) => {
+  try {
+    if (!isWechatPayConfigured()) {
+      return res.status(503).json({
+        code: "FAIL",
+        message: `wechat pay not configured: ${getWechatPayConfiguredMissingItems().join(", ")}`
+      });
+    }
+
+    await verifyWechatPayNotificationSignature(req);
+
+    const resource = req.body?.resource || {};
+    if (String(resource.algorithm || "").trim() !== "AEAD_AES_256_GCM") {
+      return res.status(400).json({
+        code: "FAIL",
+        message: "wechat pay resource algorithm unsupported"
+      });
+    }
+
+    const transaction = decryptWechatPayResource(resource);
+    const data = readData();
+    applyWechatRechargeNotification(data, transaction);
+    writeData(data);
+
+    return res.status(200).json({
+      code: "SUCCESS",
+      message: "OK"
+    });
+  } catch (error) {
+    console.error("[wechat-pay] notify failed:", error.message);
+    return res.status(error.statusCode || 400).json({
+      code: "FAIL",
+      message: error.message || "wechat pay notify failed"
+    });
+  }
 });
 
 app.all("/api/alipay/pay/notify", (req, res) => {

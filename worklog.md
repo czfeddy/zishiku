@@ -1,5 +1,114 @@
 # Worklog
 
+## 2026-04-23 ICP Filing Preparation
+
+- Checked current public site and config:
+  - `site-meta.js` has empty `icpNumber`
+  - local `.env` has empty `ICP_NUMBER`, `PUBLIC_SECURITY_NUMBER`, and `PUBLIC_SECURITY_URL`
+  - no visible ICP filing number is currently shown on the live footer
+- Confirmed current production server is an Alibaba Cloud mainland China instance:
+  - host: `198.18.2.216`
+  - region: `cn-hangzhou`
+  - zone: `cn-hangzhou-h`
+- Confirmed DNS:
+  - `xinyongdai123.com -> 198.18.0.72`
+  - `zsk.xinyongdai123.com -> 198.18.2.216`
+- Based on Alibaba Cloud official guidance, mainland China Alibaba Cloud-hosted public websites need ICP filing before compliant public service, and public security filing should be completed within 30 days after ICP filing succeeds.
+- Created a clean filing-preparation document:
+  - `docs/ICP备案提交材料-20260423.md`
+- User confirmed the filing subject should be a company.
+- Updated the filing draft to prioritize enterprise ICP filing and added company-form fields to fill.
+- Tentative company name from WeChat Pay merchant API certificate:
+  - `广州金小象信息科技有限公司`
+  - This still needs explicit confirmation before submitting ICP filing.
+- Current action needed from user:
+  - log in to Alibaba Cloud ICP filing system
+  - confirm filing subject: company or personal
+  - provide/upload required identity or business-license materials
+  - complete face/SMS verification
+
+## 2026-04-23 WeChat Pay Production Deployment
+
+### Local Implementation
+
+- Completed real WeChat Pay API v3 integration for both active backends:
+  - `server.js`
+  - `app.py`
+- Added merchant API private-key signing, APIv3 key config, notification raw-body preservation, notification signature verification, AEAD_AES_256_GCM resource decryption, callback-side order validation, and callback-side VIP fulfillment.
+- The fallback order status query flow still remains available after user return.
+- Updated `.env.example` with WeChat Pay APIv3 and verification-key/certificate fields.
+
+### Local Secret Setup
+
+- Official account:
+  - `WECHAT_APP_ID` and `WECHAT_APP_SECRET` were configured in local `.env`.
+- Merchant:
+  - `WECHAT_PAY_MCH_ID=1105997171`
+  - `WECHAT_PAY_APP_ID` uses the official account AppID.
+  - API certificate zip was provided at `C:/Program Files (x86)/Thunder Network/Thunder/Program/resources/app/plugins/DownloadSDK/WXCertUtil/cert/1105997171_20260423_cert.zip`.
+  - Extracted to `C:/Users/Administrator/Documents/zhishiku/.codex-keys/wechat-pay/`.
+  - Certificate serial: `4FBA35D0E8866AD24957DACFB535F39930C78543`.
+  - APIv3 key was configured locally.
+  - Notify URL configured as `https://zsk.xinyongdai123.com/api/wechat/pay/notify`.
+
+### Production Deployment
+
+- Current live DNS resolution: `zsk.xinyongdai123.com -> 198.18.2.216`.
+- Previous recorded host `198.18.0.76` now closes SSH during key exchange and should not be used as the active deployment target.
+- Connected to production with `C:/Users/Administrator/Documents/zhishiku/.codex-keys/zsk_deploy_key`.
+- Runtime confirmed:
+  - systemd service: `zsk-h5.service`
+  - command: `/usr/bin/python3 /opt/zsk-h5/app.py`
+  - app dir: `/opt/zsk-h5`
+  - local bind: `127.0.0.1:3000`
+  - public front: nginx
+- Backup created before deploy: `/opt/zsk-h5_backup_20260423_111338`.
+- Deployed `/opt/zsk-h5/app.py`, `/opt/zsk-h5/server.js`, merged WeChat Pay keys into `/opt/zsk-h5/.env`, and uploaded WeChat Pay cert/key files into `/opt/zsk-h5/.codex-keys/wechat-pay/`.
+- Restarted `zsk-h5.service`.
+
+### Verification
+
+- Local checks passed:
+  - `node --check server.js`
+  - `node --check public/recharge.js`
+  - `python -m py_compile app.py`
+- Remote checks passed:
+  - `python3 -m py_compile /tmp/zsk-app.py`
+  - remote `cryptography` supports `AESGCM` and `x509`
+  - `app.is_wechat_pay_configured()` returned `True`
+  - `app.get_wechat_pay_configured_missing_items()` returned `[]`
+- Production service status: `zsk-h5.service` active.
+- Public checks:
+  - `https://zsk.xinyongdai123.com/api/health` returns `200`
+  - `https://zsk.xinyongdai123.com/recharge.html` returns `200`
+  - `https://zsk.xinyongdai123.com/api/recharge/plans` returns configured VIP plans
+
+### Payment Gateway Smoke Test
+
+- Ran a no-business-write smoke test directly against WeChat Pay H5 transaction API.
+- Result:
+  - request reached WeChat Pay gateway
+  - no certificate/signature/APIv3-key error was returned
+  - gateway rejected with product permission error: `商户号该产品权限未开通，请前往商户平台>产品中心检查后重试。`
+- Meaning:
+  - code, signing, certificate path, and APIv3 key are wired correctly enough to reach the product permission layer
+  - the remaining blocker is merchant-platform product enablement, not application code
+
+### Required Next Merchant-Platform Action
+
+- In WeChat Pay Merchant Platform:
+  - open `产品中心`
+  - enable `H5支付`
+  - configure H5 payment domain `zsk.xinyongdai123.com`
+- After H5 Pay is enabled, rerun the smoke test or perform a real small recharge from `https://zsk.xinyongdai123.com/recharge.html`.
+
+### Secret Records
+
+- Created local sensitive records:
+  - `shop_secret.md`
+  - `all_secred.md`
+- Added both files to `.gitignore` to prevent accidental commit.
+
 ## 2026-04-03
 
 ### 本轮目标
